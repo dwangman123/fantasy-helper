@@ -1,0 +1,28 @@
+{
+  "season": 2027,
+  "source": "ESPN league schedule page (fantasy.espn.com/basketball/league/schedule), captured 2026-10-20",
+  "first_scoring_period_date": "2026-10-20",
+  "matchups": [
+    {"matchup_period": 1, "start": "2026-10-20", "end": "2026-10-25"},
+    {"matchup_period": 2, "start": "2026-10-26", "end": "2026-11-01"},
+    {"matchup_period": 3, "start": "2026-11-02", "end": "2026-11-08"},
+    {"matchup_period": 4, "start": "2026-11-09", "end": "2026-11-15"},
+    {"matchup_period": 5, "start": "2026-11-16", "end": "2026-11-22"},
+    {"matchup_period": 6, "start": "2026-11-23", "end": "2026-11-29"},
+    {"matchup_period": 7, "start": "2026-11-30", "end": "2026-12-06"},
+    {"matchup_period": 8, "start": "2026-12-07", "end": "2026-12-13"},
+    {"matchup_period": 9, "start": "2026-12-14", "end": "2026-12-20"},
+    {"matchup_period": 10, "start": "2026-12-21", "end": "2026-12-27"},
+    {"matchup_period": 11, "start": "2026-12-28", "end": "2027-01-03"},
+    {"matchup_period": 12, "start": "2027-01-04", "end": "2027-01-10"},
+    {"matchup_period": 13, "start": "2027-01-11", "end": "2027-01-17"},
+    {"matchup_period": 14, "start": "2027-01-18", "end": "2027-01-24"},
+    {"matchup_period": 15, "start": "2027-01-25", "end": "2027-01-31"},
+    {"matchup_period": 16, "start": "2027-02-01", "end": "2027-02-07"},
+    {"matchup_period": 17, "start": "2027-02-08", "end": "2027-02-14"},
+    {"matchup_period": 18, "start": "2027-02-15", "end": "2027-02-28"},
+    {"matchup_period": 19, "start": "2027-03-01", "end": "2027-03-07"},
+    {"matchup_period": 20, "start": "2027-03-08", "end": "2027-03-21", "playoff": true},
+    {"matchup_period": 21, "start": "2027-03-22", "end": "2027-04-04", "playoff": true}
+  ]
+}
