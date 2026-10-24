@@ -7,9 +7,11 @@ from datetime import UTC, datetime
 from fantasy_helper.calendar import load_calendar
 from fantasy_helper.config import get_settings
 from fantasy_helper.db import models as m
+from fantasy_helper.db.queries import load_game_stat_days
 from fantasy_helper.db.session import get_sessionmaker
 from fantasy_helper.espn.client import fetch_snapshot
 from fantasy_helper.ingest.store import store_snapshot
+from fantasy_helper.predict import predict_current_week, store_predictions
 
 log = logging.getLogger("fantasy_helper.ingest")
 
@@ -21,19 +23,31 @@ def run() -> m.IngestRun:
     with Session.begin() as session:
         run_row = m.IngestRun(season=settings.season, started_at=datetime.now(UTC), status="running")
         session.add(run_row)
+        stored_game_days = load_game_stat_days(session, settings.season)
     run_id = run_row.id
 
     try:
-        snap = fetch_snapshot(settings)
+        snap = fetch_snapshot(settings, stored_game_days)
         warnings = load_calendar(settings.season).validate_against_espn(snap.matchup_ids)
         for w in warnings:
             log.warning("calendar mismatch: %s", w)
+        for w in snap.warnings:
+            log.warning(w)
+        warnings += snap.warnings
+        if snap.first_tip_at and snap.fetched_at >= snap.first_tip_at:
+            # Not handled, by design: run before games start so live totals cover completed days only.
+            warnings.append(
+                f"Ran after today's first tip-off ({snap.first_tip_at.astimezone():%H:%M}); live matchup totals "
+                "may include today's games, which predictions also project"
+            )
+            log.warning(warnings[-1])
         with Session.begin() as session:
             counts = store_snapshot(session, snap)
             run_row = session.get(m.IngestRun, run_id)
             run_row.status, run_row.counts, run_row.warnings = "success", counts, warnings
             run_row.finished_at = datetime.now(UTC)
         log.info("ingest %s succeeded: %s", run_id, counts)
+        _predict(Session, settings.season, run_id, warnings)
     except Exception as exc:
         with Session.begin() as session:
             run_row = session.get(m.IngestRun, run_id)
@@ -42,6 +56,21 @@ def run() -> m.IngestRun:
         log.exception("ingest %s failed", run_id)
         raise
     return run_row
+
+
+def _predict(Session, season: int, run_id: int, warnings: list[str]) -> None:
+    """Append this week's matchup predictions. A failure here is a warning, not a failed ingest."""
+    try:
+        with Session.begin() as session:
+            n = store_predictions(session, predict_current_week(session, season), run_id, warnings)
+            run_row = session.get(m.IngestRun, run_id)
+            run_row.counts = {**run_row.counts, "predictions": n}
+        log.info("stored %d matchup predictions", n)
+    except Exception as exc:
+        log.exception("matchup predictions failed")
+        with Session.begin() as session:
+            run_row = session.get(m.IngestRun, run_id)
+            run_row.warnings = [*(run_row.warnings or []), f"matchup predictions failed: {exc!r}"]
 
 
 def main() -> None:

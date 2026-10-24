@@ -26,6 +26,8 @@ def snapshot(roster_team=4):
         matchups=[],
         matchup_ids={},
         fetched_at=datetime.now(UTC),
+        lineup_slot_counts={"PG": 1, "UT": 3, "BE": 3},
+        scoring_type="H2H_MOST_CATEGORIES",
     )
 
 
@@ -42,3 +44,27 @@ def test_store_is_idempotent_and_replaces_snapshot():
         assert s.scalars(select(m.RosterEntry.team_id)).all() == [7]
         assert s.get(m.StatLine, (2027, 10, "projected")).tpm == 1.0
     assert counts["rostered"] == 1
+    with Session(engine) as s:
+        league = s.get(m.League, 2027)
+        assert league.lineup_slot_counts == {"PG": 1, "UT": 3, "BE": 3}
+        assert league.scoring_type == "H2H_MOST_CATEGORIES"
+
+
+def test_game_stats_accumulate_and_corrections_overwrite():
+    from fantasy_helper.domain import PlayerGameStat
+
+    engine = create_engine("sqlite://")
+    m.Base.metadata.create_all(engine)
+    stats = {k: 1.0 for k in m.STAT_COLUMNS}
+    day1 = PlayerGameStat(10, 1, "BOS", 30.0, stats, team_id=4, lineup_slot="SF")
+    for games in (
+        [day1],
+        [PlayerGameStat(10, 1, "BOS", 30.0, stats | {"PTS": 9.0}), PlayerGameStat(10, 2, "BOS", 31.0, stats)],
+    ):
+        snap = snapshot()
+        snap.game_stats = games
+        with Session(engine) as s, s.begin():
+            store_snapshot(s, snap)
+    with Session(engine) as s:
+        assert s.scalar(select(func.count()).select_from(m.PlayerGameStat)) == 2
+        assert s.get(m.PlayerGameStat, (2027, 10, 1)).pts == 9.0  # stat correction applied

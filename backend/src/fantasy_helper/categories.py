@@ -35,6 +35,10 @@ KNOWN_CATEGORIES: dict[int, Category] = {
     20: Category("FT%", 20, makes="FTM", attempts="FTA"),
 }
 
+# Makes/attempts stat ids that ESPN reports alongside the cats in matchup scores.
+# Stored so live FG%/FT% can be combined with projected makes and attempts.
+COMPONENT_STAT_IDS: dict[int, str] = {13: "FGM", 14: "FGA", 15: "FTM", 16: "FTA"}
+
 # Display order used throughout the app (ESPN's own scoreboard order).
 _DISPLAY_ORDER = ["FG%", "FT%", "3PM", "REB", "AST", "STL", "BLK", "TO", "PTS"]
 

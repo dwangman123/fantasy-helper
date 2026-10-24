@@ -1,5 +1,5 @@
 """Persist a LeagueSnapshot. Season-scoped tables are replaced in one transaction,
-so readers never see a half-written snapshot."""
+so readers never see a half-written snapshot; game logs accumulate instead."""
 
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
@@ -21,6 +21,8 @@ def store_snapshot(session: Session, snap: LeagueSnapshot) -> dict[str, int]:
             current_matchup_period=snap.current_matchup_period,
             current_scoring_period=snap.current_scoring_period,
             updated_at=snap.fetched_at,
+            lineup_slot_counts=snap.lineup_slot_counts,
+            scoring_type=snap.scoring_type,
         )
     )
     for p in snap.players:
@@ -91,6 +93,32 @@ def store_snapshot(session: Session, snap: LeagueSnapshot) -> dict[str, int]:
         )
         for x in snap.matchups
     )
+    # Replace opponent stats only when this run fetched them, so a failed fetch keeps the last good set.
+    if snap.opponent_stats:
+        session.execute(delete(m.OpponentStat).where(m.OpponentStat.season == season))
+        session.add_all(
+            m.OpponentStat(
+                season=season,
+                pro_team=o.pro_team,
+                gp=o.gp,
+                **{col: o.per_game[key] for key, col in m.STAT_COLUMNS.items()},
+            )
+            for o in snap.opponent_stats
+        )
+    # Game logs are history: upserted (stat corrections overwrite), never deleted.
+    for g in snap.game_stats:
+        session.merge(
+            m.PlayerGameStat(
+                season=season,
+                player_id=g.player_id,
+                scoring_period=g.scoring_period,
+                pro_team=g.pro_team,
+                team_id=g.team_id,
+                lineup_slot=g.lineup_slot,
+                minutes=g.minutes,
+                **{col: g.stats[key] for key, col in m.STAT_COLUMNS.items()},
+            )
+        )
     return {
         "teams": len(snap.teams),
         "players": len(snap.players),
@@ -98,4 +126,6 @@ def store_snapshot(session: Session, snap: LeagueSnapshot) -> dict[str, int]:
         "stat_lines": len(snap.stat_lines),
         "pro_games": len(snap.pro_games),
         "matchups": len(snap.matchups),
+        "game_stats": len(snap.game_stats),
+        "opponent_stats": len(snap.opponent_stats),
     }

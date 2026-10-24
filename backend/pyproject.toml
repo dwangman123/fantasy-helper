@@ -10,6 +10,7 @@ requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.20.0",
     "espn-api>=1.0.1",
+    "numpy>=2.5.4",
     "psycopg[binary]>=3.3.6",
     "pydantic-settings>=2.16.0",
     "sqlalchemy>=2.0",
@@ -17,6 +18,7 @@ dependencies = [
 
 [project.scripts]
 fh-ingest = "fantasy_helper.ingest.run:main"
+fh-predict = "fantasy_helper.predict:main"
 
 [build-system]
 requires = ["uv_build>=0.12.0,<0.13.0"]

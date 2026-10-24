@@ -40,6 +40,9 @@ class League(Base):
     current_matchup_period: Mapped[int] = mapped_column(Integer)
     current_scoring_period: Mapped[int] = mapped_column(Integer)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # Nullable so the migration can add them to an existing row; set on every ingest.
+    lineup_slot_counts: Mapped[dict | None] = mapped_column(JSON)  # slot name -> count, incl. BE/IR
+    scoring_type: Mapped[str | None] = mapped_column(String(40))
 
 
 class Team(Base):
@@ -99,6 +102,54 @@ class StatLine(Base):
     fta: Mapped[float] = mapped_column(Float)
 
 
+class PlayerGameStat(Base):
+    """One player's box score for one day. Upserted and never wiped: this is the
+    game-log history (variance fitting, backtests). No foreign key to players,
+    since a free agent's past game can predate his place in the current pool."""
+
+    __tablename__ = "player_game_stats"
+
+    season: Mapped[int] = mapped_column(Integer, primary_key=True)
+    player_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    scoring_period: Mapped[int] = mapped_column(Integer, primary_key=True)
+    pro_team: Mapped[str | None] = mapped_column(String(10))
+    team_id: Mapped[int | None] = mapped_column(Integer)
+    lineup_slot: Mapped[str | None] = mapped_column(String(10))
+    minutes: Mapped[float] = mapped_column(Float)
+    pts: Mapped[float] = mapped_column(Float)
+    reb: Mapped[float] = mapped_column(Float)
+    ast: Mapped[float] = mapped_column(Float)
+    stl: Mapped[float] = mapped_column(Float)
+    blk: Mapped[float] = mapped_column(Float)
+    tpm: Mapped[float] = mapped_column(Float)
+    tov: Mapped[float] = mapped_column(Float)
+    fgm: Mapped[float] = mapped_column(Float)
+    fga: Mapped[float] = mapped_column(Float)
+    ftm: Mapped[float] = mapped_column(Float)
+    fta: Mapped[float] = mapped_column(Float)
+
+
+class OpponentStat(Base):
+    """Per-game stats each NBA team allows. Replaced on ingests where the fetch succeeds."""
+
+    __tablename__ = "nba_team_opponent_stats"
+
+    season: Mapped[int] = mapped_column(Integer, primary_key=True)
+    pro_team: Mapped[str] = mapped_column(String(10), primary_key=True)
+    gp: Mapped[float] = mapped_column(Float)
+    pts: Mapped[float] = mapped_column(Float)
+    reb: Mapped[float] = mapped_column(Float)
+    ast: Mapped[float] = mapped_column(Float)
+    stl: Mapped[float] = mapped_column(Float)
+    blk: Mapped[float] = mapped_column(Float)
+    tpm: Mapped[float] = mapped_column(Float)
+    tov: Mapped[float] = mapped_column(Float)
+    fgm: Mapped[float] = mapped_column(Float)
+    fga: Mapped[float] = mapped_column(Float)
+    ftm: Mapped[float] = mapped_column(Float)
+    fta: Mapped[float] = mapped_column(Float)
+
+
 class ProGame(Base):
     __tablename__ = "pro_games"
 
@@ -121,6 +172,34 @@ class Matchup(Base):
     playoff_tier: Mapped[str] = mapped_column(String(40))
     home_cats: Mapped[dict] = mapped_column(JSON)
     away_cats: Mapped[dict] = mapped_column(JSON)
+
+
+class MatchupPrediction(Base):
+    """One prediction per matchup per run. Append-only: the history shows how the
+    odds moved through the week and is what a backtest scores."""
+
+    __tablename__ = "matchup_predictions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ingest_run_id: Mapped[int | None] = mapped_column(ForeignKey("ingest_runs.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    season: Mapped[int] = mapped_column(Integer)
+    espn_id: Mapped[int] = mapped_column(Integer)
+    matchup_period: Mapped[int] = mapped_column(Integer, index=True)
+    scoring_period: Mapped[int] = mapped_column(Integer)  # first day still to play when predicted
+    home_team_id: Mapped[int] = mapped_column(Integer)
+    away_team_id: Mapped[int] = mapped_column(Integer)
+    p_home: Mapped[float] = mapped_column(Float)
+    p_tie: Mapped[float] = mapped_column(Float)
+    p_away: Mapped[float] = mapped_column(Float)
+    cat_probs: Mapped[dict] = mapped_column(JSON)
+    expected_score: Mapped[dict] = mapped_column(JSON)
+    most_likely_score: Mapped[list] = mapped_column(JSON)
+    projected_totals: Mapped[dict] = mapped_column(JSON)
+    expected_games: Mapped[dict] = mapped_column(JSON)
+    n_sims: Mapped[int] = mapped_column(Integer)
+    model_version: Mapped[str] = mapped_column(String(20))
+    warnings: Mapped[list | None] = mapped_column(JSON)
 
 
 class IngestRun(Base):
