@@ -4,10 +4,11 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 
 from fantasy_helper.categories import KNOWN_CATEGORIES
+from fantasy_helper.context import p_play
 from fantasy_helper.db import models as m
 from fantasy_helper.domain import LeagueSnapshot, Matchup, Player, ProGame, RosterEntry, StatLine, Team
 from fantasy_helper.ingest.store import store_snapshot
-from fantasy_helper.predict import p_play, predict_current_week, store_predictions
+from fantasy_helper.predict import predict_current_week, store_predictions
 
 SLOTS = {"PG": 1, "SG": 1, "SF": 1, "PF": 1, "C": 1, "G": 1, "F": 1, "UT": 3, "BE": 3, "IR": 1}
 

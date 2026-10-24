@@ -63,3 +63,28 @@ def test_per_game_factors_scale_expected_stats():
     boosted = SimPlayer(1, ANY, {k: 0.0 for k in STAT_KEYS} | {"PTS": 20.0}, {1: {"PTS": 1.1}, 2: {}})
     pred = simulate_matchup([PTS], {"home": {}, "away": {}}, {"home": [boosted], "away": []}, [1, 2], SLOTS, 20000)
     assert pred.projected_totals["home"]["PTS"] == pytest.approx(42.0, abs=0.3)  # 22 + 20
+
+
+def test_adding_a_player_who_adds_nothing_leaves_every_draw_alone():
+    # Common random numbers: availability is seeded per player-game, not from one stream,
+    # so a new day-to-day player doesn't reshuffle the others' coin flips.
+    team = [player(i, p_play=0.5) for i in range(3)]
+    idle = SimPlayer(99, ANY, {k: 0.0 for k in STAT_KEYS}, {d: {} for d in (1, 2, 3)}, 0.5)
+    opp = [player(10 + i) for i in range(3)]
+    args = (CATS, {"home": {}, "away": {}})
+    base = simulate_matchup(*args, {"home": team, "away": opp}, [1, 2, 3], SLOTS, 2000)
+    more = simulate_matchup(*args, {"home": [*team, idle], "away": opp}, [1, 2, 3], SLOTS, 2000)
+    assert more.cat_probs == base.cat_probs and more.p_home == base.p_home
+
+
+def test_small_roster_change_moves_odds_a_little_not_by_noise():
+    team = [player(i) for i in range(8)]
+    opp = [player(10 + i) for i in range(8)]
+    tiny = player(99, PTS=0.5)
+    args = (CATS, {"home": {}, "away": {}})
+    base = simulate_matchup(*args, {"home": team, "away": opp}, [1, 2, 3], SLOTS, 2000)
+    more = simulate_matchup(*args, {"home": [*team, tiny], "away": opp}, [1, 2, 3], SLOTS, 2000)
+    assert 0 <= more.cat_probs["PTS"]["home"] - base.cat_probs["PTS"]["home"] < 0.02
+    assert {k: v for k, v in more.cat_probs.items() if k != "PTS"} == {
+        k: v for k, v in base.cat_probs.items() if k != "PTS"
+    }

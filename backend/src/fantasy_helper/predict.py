@@ -2,13 +2,8 @@
 
 The ingest runs this after each snapshot and appends the results to
 `matchup_predictions`; `fh-predict` runs it on demand and prints without storing.
-
-Per player: blended per-game rates (`rates.blend_rates`), games on the days left
-in the week (`pro_games`), each adjusted for the NBA opponent
-(`opponent.opponent_factors`), a chance of playing from ESPN's injury status, and a
-start priority from blended z-scores. Players in the IR slot are left out.
-Game-to-game spread comes from the box-score history (`variance.fit_dispersion`),
-falling back to Poisson until there are enough logged games.
+Inputs per player (rates, games, opponent factors, chance of playing, start
+priority) come from `context.load_context`.
 """
 
 import argparse
@@ -18,30 +13,16 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from fantasy_helper.analytics.matchup import MatchupPrediction, SimPlayer, simulate_matchup
-from fantasy_helper.analytics.opponent import opponent_factors
-from fantasy_helper.analytics.rates import blend_rates
-from fantasy_helper.analytics.variance import fit_dispersion
-from fantasy_helper.analytics.zscores import player_zscores
-from fantasy_helper.calendar import load_calendar
+from fantasy_helper.analytics.matchup import MatchupPrediction, simulate_matchup
 from fantasy_helper.config import get_settings
+from fantasy_helper.context import LeagueContext, load_context
 from fantasy_helper.db import models as m
 from fantasy_helper.db import queries as q
 from fantasy_helper.db.session import get_sessionmaker
-from fantasy_helper.domain import STAT_KEYS, Matchup
+from fantasy_helper.domain import Matchup
 
-MODEL_VERSION = "1"
+MODEL_VERSION = "2"  # 2: common random numbers (inverse-CDF team totals, per player-game availability)
 N_SIMS = 5000
-OUT_STATUSES = {"OUT", "SUSPENSION", "INJURY_RESERVE"}
-DAY_TO_DAY_P_PLAY = 0.5
-
-
-def p_play(injury_status: str | None) -> float:
-    if injury_status in OUT_STATUSES:
-        return 0.0
-    if injury_status == "DAY_TO_DAY":
-        return DAY_TO_DAY_P_PLAY
-    return 1.0
 
 
 @dataclass
@@ -53,58 +34,32 @@ class WeekPredictions:
     results: list[tuple[Matchup, MatchupPrediction]]
 
 
-def predict_current_week(session: Session, season: int, n_sims: int = N_SIMS, seed: int = 0) -> WeekPredictions:
-    league = session.get(m.League, season)
-    if league is None or not league.lineup_slot_counts:
-        raise LookupError(f"No league settings stored for season {season}; run fh-ingest first")
-    categories = q.load_categories(session, season)
-    week = load_calendar(season).week(league.current_matchup_period)
-    days = [sp for sp in week.scoring_periods if sp >= league.current_scoring_period]
+def predict_matchup(ctx: LeagueContext, mu: Matchup, n_sims: int = N_SIMS, seed: int = 0) -> MatchupPrediction:
+    """The seed is offset by the matchup id, so each matchup has its own random numbers
+    and waiver swaps can reuse them."""
+    days = ctx.days_left
+    return simulate_matchup(
+        ctx.categories,
+        {"home": mu.home_cats, "away": mu.away_cats},
+        {"home": ctx.team_sim_players(mu.home_team_id, days), "away": ctx.team_sim_players(mu.away_team_id, days)},
+        days,
+        ctx.slot_counts,
+        n_sims=n_sims,
+        seed=seed + mu.espn_id,
+        dispersion=ctx.dispersion,
+    )
 
-    rosters = q.load_rosters(session, season)
-    rostered_ids = {r.player_id for r in rosters}
-    players = q.load_players(session, rostered_ids)
-    lines = blend_rates(q.load_stat_lines(session, season, "season"), q.load_stat_lines(session, season, "projected"))
-    rates = {s.player_id: s.per_game for s in lines}
-    z = player_zscores(lines, categories, baseline_ids=rostered_ids)
-    schedule = q.load_schedule(session, season, days)
-    factors = opponent_factors(q.load_opponent_stats(session, season))
-    dispersion = fit_dispersion(q.load_game_stats(session, season), STAT_KEYS)
 
-    def sim_players(team_id: int) -> list[SimPlayer]:
-        out = []
-        for r in rosters:
-            if r.team_id != team_id or r.lineup_slot == "IR" or r.player_id not in rates:
-                continue
-            p = players[r.player_id]
-            out.append(
-                SimPlayer(
-                    player_id=r.player_id,
-                    eligible_slots=p.eligible_slots,
-                    per_game=rates[r.player_id],
-                    games={d: factors.get(opp, {}) for d, opp in schedule.get(p.pro_team, {}).items()},
-                    p_play=p_play(p.injury_status),
-                    priority=z[r.player_id].total,
-                )
-            )
-        return out
-
-    results = []
-    for mu in q.load_matchups(session, season, league.current_matchup_period):
-        if mu.away_team_id is None:  # playoff bye
-            continue
-        prediction = simulate_matchup(
-            categories,
-            {"home": mu.home_cats, "away": mu.away_cats},
-            {"home": sim_players(mu.home_team_id), "away": sim_players(mu.away_team_id)},
-            days,
-            league.lineup_slot_counts,
-            n_sims=n_sims,
-            seed=seed + mu.espn_id,
-            dispersion=dispersion,
-        )
-        results.append((mu, prediction))
-    return WeekPredictions(season, league.current_matchup_period, days, list(week.scoring_periods), results)
+def predict_current_week(
+    session: Session, season: int, n_sims: int = N_SIMS, seed: int = 0, ctx: LeagueContext | None = None
+) -> WeekPredictions:
+    ctx = ctx or load_context(session, season)
+    results = [
+        (mu, predict_matchup(ctx, mu, n_sims, seed))
+        for mu in q.load_matchups(session, season, ctx.matchup_period)
+        if mu.away_team_id is not None  # playoff bye
+    ]
+    return WeekPredictions(season, ctx.matchup_period, ctx.days_left, list(ctx.week.scoring_periods), results)
 
 
 def store_predictions(
