@@ -20,6 +20,15 @@ week: actual totals so far plus a Monte Carlo of the days left (blended per-game
 NBA opponent adjustment, injury status, the 10-starter daily lineup cap). Results are
 appended to `matchup_predictions`; `fh-predict` prints them on demand.
 
+**Week 3b (waivers, API, first UI): done.** Free agents are ranked for my team two ways.
+*Stream* re-runs this week's matchup with each free agent swapped in for one of my
+lowest-value players and ranks by the change in win odds; *hold* ranks by the change in
+expected categories won per week against a league-average team over the rest of the
+season. A category board labels each category locked / swing / lost. A FastAPI service
+serves matchups and waivers, and a Next.js app has Matchup and Waivers pages.
+Still open: what the league's add limit means and when a pickup can first play (the
+rankings assume the next day; see PROJECT_PLAN.md).
+
 ## Backend quickstart
 
 Requires [uv](https://docs.astral.sh/uv/). Python 3.12 is installed by uv automatically.
@@ -30,6 +39,8 @@ uv sync
 uv run alembic upgrade head   # create tables (SQLite at backend/fantasy.db by default)
 uv run fh-ingest              # pull the league from ESPN (run daily, before the first tip-off)
 uv run fh-predict             # this week's matchup odds; --team ID for detail (default: mine)
+uv run fh-waivers             # stream and hold rankings; --today if pickups can play today
+uv run fh-api                 # REST API on http://127.0.0.1:8000 (docs at /docs)
 uv run pytest                 # tests
 uv run ruff check . && uv run ruff format --check .
 ```
@@ -37,6 +48,19 @@ uv run ruff check . && uv run ruff format --check .
 Configuration lives in `backend/src/fantasy_helper/config.py` and can be overridden with
 `FH_*` env vars or `backend/.env` (see `backend/.env.example`). To use Postgres instead of
 SQLite, run `docker compose up -d` and set `FH_DATABASE_URL`.
+
+## Frontend quickstart
+
+Requires Node 20.9+. With `fh-api` running:
+
+```bash
+cd frontend
+npm install
+npm run dev                   # http://localhost:3000; /api/* is proxied to the backend
+npm run build && npm run typecheck
+```
+
+Set `API_URL` if the backend isn't at `http://127.0.0.1:8000`.
 
 ## Layout
 
@@ -51,11 +75,15 @@ backend/
     db/              SQLAlchemy models + session
     ingest/          snapshot persistence + `fh-ingest` job
     analytics/       pure functions: z-scores, team profiles, blended rates, lineup cap,
-                     opponent factors, dispersion fit, matchup simulation
+                     opponent factors, dispersion fit, matchup simulation, waiver rankings
+    context.py       stored snapshot -> analytics inputs (rates, games, priorities)
     predict.py       current-week predictions from stored data + `fh-predict`
+    waivers.py       stream/hold rankings for one team + `fh-waivers`
+    api/             FastAPI app (`fh-api`)
   alembic/           migrations
   data/              per-season matchup calendars
   tests/
+frontend/            Next.js + TanStack Query: Matchup and Waivers pages
 ```
 
 ## Data notes

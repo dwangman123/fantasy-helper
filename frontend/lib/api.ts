@@ -1,0 +1,166 @@
+// Types mirror backend/src/fantasy_helper/api/schemas.py.
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+
+export type Category = { key: string; is_percentage: boolean; reverse: boolean };
+
+export type Team = { team_id: number; name: string; abbrev: string; wins: number; losses: number; ties: number };
+
+export type League = {
+  season: number;
+  name: string;
+  my_team_id: number;
+  today: string;
+  scoring_period: number;
+  week: { matchup_period: number; start: string; end: string; days: number; days_left: number };
+  categories: Category[];
+  teams: Team[];
+  last_ingest: {
+    id: number;
+    status: string;
+    started_at: string;
+    finished_at: string | null;
+    warnings: string[];
+  } | null;
+};
+
+export type MatchupSummary = {
+  espn_id: number;
+  home_team_id: number;
+  away_team_id: number;
+  p_home: number;
+  p_tie: number;
+  p_away: number;
+  expected_home: number;
+  expected_away: number;
+};
+
+export type Label = "locked" | "swing" | "lost";
+
+export type CategoryOdds = Category & {
+  now_me: number | null;
+  now_opp: number | null;
+  proj_me: number;
+  proj_opp: number;
+  p_win: number;
+  p_tie: number;
+  p_loss: number;
+  label: Label;
+};
+
+export type OddsPoint = { created_at: string; scoring_period: number; p_win: number; p_tie: number; p_loss: number };
+
+export type MatchupDetail = {
+  espn_id: number;
+  matchup_period: number;
+  team_id: number;
+  opponent_id: number;
+  week_days: string[];
+  days_left: string[];
+  p_win: number;
+  p_tie: number;
+  p_loss: number;
+  expected: { me: number; opp: number; ties: number };
+  most_likely: { me: number; opp: number; ties: number };
+  starts_left_me: number;
+  starts_left_opp: number;
+  categories: CategoryOdds[];
+  history: OddsPoint[];
+  n_sims: number;
+};
+
+export type Player = {
+  player_id: number;
+  name: string;
+  pro_team: string;
+  position: string;
+  injury_status: string | null;
+  z: Record<string, number>;
+  z_total: number;
+};
+
+export type StreamRow = {
+  add: Player;
+  drop: Player | null;
+  games: number;
+  extra_starts: number;
+  p_win: number;
+  d_p_win: number;
+  d_p_tie: number;
+  d_expected_cats: number;
+  cat_d_p_win: Record<string, number>;
+  gained: string[];
+  lost: string[];
+};
+
+export type HoldRow = {
+  add: Player;
+  drop: Player | null;
+  games: number;
+  d_cats_per_week: number;
+  cat_d_p_win: Record<string, number>;
+};
+
+export type Waivers = {
+  team_id: number;
+  opponent_id: number;
+  matchup_period: number;
+  first_day: string;
+  days_left: string[];
+  baseline: { p_win: number; p_tie: number; p_loss: number; expected_cats: number; starts_left: number };
+  board: { key: string; label: Label; p_win: number; p_tie: number; p_loss: number }[];
+  stream: StreamRow[];
+  stream_screened: number;
+  hold: {
+    weeks: number;
+    first_period: number | null;
+    cats_per_week: number;
+    cat_p_win: Record<string, number>;
+    rows: HoldRow[];
+    screened: number;
+  };
+  drops: (Player | null)[];
+  free_agents: number;
+  assumptions: string[];
+  n_sims: number;
+};
+
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+async function get<T>(path: string, params: Record<string, string | number | boolean | undefined> = {}): Promise<T> {
+  const query = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) if (v !== undefined) query.set(k, String(v));
+  const res = await fetch(`/api${path}${query.size ? `?${query}` : ""}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new ApiError(res.status, body?.detail ?? `${res.status} ${res.statusText}`);
+  }
+  return res.json();
+}
+
+export const useLeague = () => useQuery({ queryKey: ["league"], queryFn: () => get<League>("/league") });
+
+export const useMatchups = () =>
+  useQuery({ queryKey: ["matchups"], queryFn: () => get<MatchupSummary[]>("/matchups") });
+
+export const useMatchup = (teamId: number | undefined) =>
+  useQuery({
+    queryKey: ["matchup", teamId],
+    queryFn: () => get<MatchupDetail>("/matchup", { team_id: teamId }),
+    enabled: teamId !== undefined,
+    placeholderData: keepPreviousData,
+  });
+
+export const useWaivers = (teamId: number | undefined, sameDay: boolean) =>
+  useQuery({
+    queryKey: ["waivers", teamId, sameDay],
+    queryFn: () => get<Waivers>("/waivers", { team_id: teamId, same_day: sameDay }),
+    enabled: teamId !== undefined,
+    placeholderData: keepPreviousData,
+  });
