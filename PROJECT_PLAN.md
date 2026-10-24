@@ -30,7 +30,10 @@ Next.js frontend ←→ FastAPI (App Runner/ECS) ──┤
   - `zscores.py`: per-cat z-scores over a configurable window (season / L14 / L7). FG% and FT% are **volume-weighted impact** (makes − league% × attempts). TO is negated.
   - `team_profile.py`: team per-cat totals, ranks, inferred punt cats.
   - `matchup.py` ✅: live weekly prediction = actual totals so far + Monte Carlo of the days left. Per player-game: blended rate (`rates.py`) × opponent factor (`opponent.py`), a chance of playing from injury status, and the daily 10-starter cap (`lineup.py`, priority by z-score). Variance is Poisson until box-score history allows a fitted dispersion (`variance.py`). Output: P(win/tie/loss), P(win) per cat, expected and most likely category score, projected finals. Run by the ingest and by `fh-predict`.
-  - `waivers.py`: rank free agents by Δ in *my* matchup/season cat win-probabilities when swapped for my worst roster player, not by generic rank.
+  - `waivers.py`: rank free agents by what they do for *my* team, never by generic rank. Two rankings:
+    - **Stream (this week):** re-run `matchup.py` against my actual opponent with the free agent swapped in for one of my players, starting from the first day he could play. Rank by Δ P(win matchup), the goal in a most-categories league, with Δ expected categories won as the tiebreak. Show the drop, the extra *started* games he adds after the lineup cap, and the per-category Δ P(win).
+    - **Hold (rest of season):** Δ expected categories won per week against a league-average opponent, using blended rates and the remaining NBA schedule.
+    - **Category targeting comes from the opponent matchup.** Each category is labeled from its P(win): **locked** (> 90%), **swing** (10–90%) or **lost** (< 10%). Because the stream ranking measures win odds against this opponent, help in a swing category ranks high, help in a locked or lost category ranks low, and hurting a lost category costs nothing. A high-TO streamer is fine if TO is already lost, so weekly punting falls out automatically. The UI shows this board and which categories each candidate flips.
   - `trades.py`: evaluate a trade (Δ cat win odds for both sides). Trade finder searches 1-for-1 and 2-for-1 across 9 teams for mutually positive deals.
 - **API** (`backend/src/fantasy_helper/api/`): REST endpoints wrapping each analytics function.
 - **Agent** (`backend/src/fantasy_helper/agent/`): OpenAI function calling. Tools = `get_my_team`, `get_matchup_projection`, `rank_waivers`, `evaluate_trade`, `find_trades`, `get_team_profile`, `player_lookup`. The LLM only explains and orchestrates; all numbers come from deterministic tools. Add a small **eval suite** (`agent/evals/`) of questions with expected tool calls and answer checks. This is a strong resume bullet.
@@ -41,7 +44,12 @@ Next.js frontend ←→ FastAPI (App Runner/ECS) ──┤
 2. **Wk 2 – Analytics core** ✅: z-scores, team profiles, tests with pytest and fixture data.
 3. **Wk 3 – Matchup + Waivers (MVP)**
    - **3a – Live matchup predictor** ✅: daily H2H win odds and expected category score. Required ingest additions (makes/attempts, lineup slots, box-score history, opponent stats) and new analytics (blended rates, lineup cap, opponent factors, dispersion fit).
-   - **3b – Waivers + API + basic UI**: waiver ranking reuses `matchup.py` (Δ win odds from a swap); REST endpoints and a first UI, including the matchup view. *Usable for the season from here.*
+   - **3b – Waivers + API + basic UI**: the Stream and Hold rankings and the category board (see `waivers.py` above); REST endpoints; a first UI with Matchup and Waivers pages. *Usable for the season from here.*
+     - **Verify first:** what the league's add limit means. `mSettings` shows `matchupAcquisitionLimit: 0.43` and `matchupLimitPerScoringPeriod: true`, which is unclear. Check it against the league settings page, then show adds remaining. Also confirm when a pickup can first play (assumed: the next day).
+     - **Common random numbers:** the baseline and every swap must reuse the same random draws for the players they share. Otherwise a 1–2 point Δ P(win) is simulation noise. This means seeding draws per player-game in `matchup.py` rather than from one shared stream.
+     - **Keep it fast:** 200 free agents × 13 possible drops is too many full simulations. Prune free agents by games started this week and by value in swing categories, and consider only my lowest-priority players as drops.
+     - **Assumptions to state in the UI:** the opponent's roster stays fixed (they may stream too), and the ranking is for one move.
+   - **Later, not in 3b:** multi-move streaming plans (a chain of add/drops through the week within the add limit), once single-swap rankings are proven against the backtest.
 4. **Wk 4 – Trades + League view**: trade evaluator/finder, 10-team category heatmap, punt detection, power rankings.
 5. **Wk 5 – Agent**: OpenAI tool loop, streaming chat UI, evals.
 6. **Wk 6 – AWS deploy**: Terraform (RDS, ECS/App Runner, EventBridge, Secrets Manager for the OpenAI key), GitHub Actions CI/CD, frontend on Amplify/Vercel.
