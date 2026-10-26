@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -45,6 +47,12 @@ def test_matchup_is_from_my_side_with_history(client):
     assert {c["label"] for c in body["categories"]} <= {"locked", "swing", "lost"}
     other = client.get("/api/matchup", params={"team_id": 7}).json()
     assert other["p_win"] == body["p_loss"] and other["opponent_id"] == MY_TEAM
+
+
+def test_timestamps_are_sent_as_utc(client):
+    # SQLite returns stored timestamps naive; the API must still send their UTC offset.
+    created = client.get("/api/matchup").json()["history"][0]["created_at"]
+    assert datetime.fromisoformat(created).utcoffset() == timedelta(0)
 
 
 def test_waivers_rank_stream_and_hold(client):

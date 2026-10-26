@@ -1,9 +1,19 @@
 """Response models. Matchup and waiver views are from one team's side ("me" / "opp"),
 so the UI never has to work out whether that team is home or away."""
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
+from typing import Annotated
 
-from pydantic import BaseModel
+from pydantic import AfterValidator, BaseModel
+
+
+def _as_utc(t: datetime) -> datetime:
+    # Timestamps are written in UTC, but SQLite hands them back naive; without an
+    # offset the browser would read them as local time.
+    return t.replace(tzinfo=UTC) if t.tzinfo is None else t.astimezone(UTC)
+
+
+UtcDatetime = Annotated[datetime, AfterValidator(_as_utc)]
 
 
 class CategoryOut(BaseModel):
@@ -24,8 +34,8 @@ class TeamOut(BaseModel):
 class IngestOut(BaseModel):
     id: int
     status: str
-    started_at: datetime
-    finished_at: datetime | None
+    started_at: UtcDatetime
+    finished_at: UtcDatetime | None
     warnings: list[str]
 
 
@@ -81,7 +91,7 @@ class CategoryOdds(BaseModel):
 
 
 class OddsPoint(BaseModel):
-    created_at: datetime
+    created_at: UtcDatetime
     scoring_period: int
     p_win: float
     p_tie: float
