@@ -25,7 +25,10 @@ appended to `matchup_predictions`; `fh-predict` prints them on demand.
 lowest-value players and ranks by the change in win odds; *hold* ranks by the change in
 expected categories won per week against a league-average team over the rest of the
 season. A category board labels each category locked / swing / lost. A FastAPI service
-serves matchups and waivers, and a Next.js app has Matchup and Waivers pages.
+serves matchups and waivers, and a Next.js app has Matchup and Waivers pages. The Matchup
+page also breaks the week down by player and day, following the lineup set on ESPN (box
+scores for days played, projections after), and a Refresh button runs the ingest
+(`POST /api/refresh`).
 Still open: what the league's add limit means and when a pickup can first play (the
 rankings assume the next day; see PROJECT_PLAN.md).
 
@@ -99,6 +102,10 @@ frontend/            Next.js + TanStack Query: Matchup and Waivers pages
 - **Ingest timing**: run once a day before the first game. ESPN's live matchup totals include
   games in progress, which the predictor would also project; a run after the first tip-off is
   flagged in `ingest_runs.warnings` (and on that run's predictions) but not corrected.
+- **Set lineups**: ESPN keeps a lineup for every future day, not just today. Each ingest stores
+  every team's slots from today through the end of the week (`daily_lineups`); past days' slots
+  come from the box scores. Win odds still assume the best lineup each day, so the by-day view's
+  totals can differ from the odds' projected finals.
 - **History tables** are never wiped: `player_game_stats` (daily box scores; missing days are
   backfilled and the latest day is re-fetched for stat corrections) and `matchup_predictions`
   (one row per matchup per run, for tracking odds through the week and for backtests).

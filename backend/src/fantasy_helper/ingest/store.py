@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from fantasy_helper.db import models as m
 from fantasy_helper.domain import LeagueSnapshot
 
-_SEASON_TABLES = [m.RosterEntry, m.StatLine, m.ProGame, m.Matchup, m.Team]
+_SEASON_TABLES = [m.RosterEntry, m.DailyLineup, m.StatLine, m.ProGame, m.Matchup, m.Team]
 
 
 def store_snapshot(session: Session, snap: LeagueSnapshot) -> dict[str, int]:
@@ -57,6 +57,16 @@ def store_snapshot(session: Session, snap: LeagueSnapshot) -> dict[str, int]:
             acquisition_type=r.acquisition_type,
         )
         for r in snap.rosters
+    )
+    session.add_all(
+        m.DailyLineup(
+            season=season,
+            scoring_period=d.scoring_period,
+            player_id=d.player_id,
+            team_id=d.team_id,
+            lineup_slot=d.lineup_slot,
+        )
+        for d in snap.daily_lineups
     )
     session.add_all(
         m.StatLine(
@@ -123,6 +133,7 @@ def store_snapshot(session: Session, snap: LeagueSnapshot) -> dict[str, int]:
         "teams": len(snap.teams),
         "players": len(snap.players),
         "rostered": len(snap.rosters),
+        "daily_lineups": len(snap.daily_lineups),
         "stat_lines": len(snap.stat_lines),
         "pro_games": len(snap.pro_games),
         "matchups": len(snap.matchups),

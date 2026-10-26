@@ -13,6 +13,7 @@ from fantasy_helper.categories import COMPONENT_STAT_IDS, Category
 from fantasy_helper.domain import (
     STAT_KEYS,
     STAT_WINDOWS,
+    DailySlot,
     Matchup,
     OpponentStats,
     Player,
@@ -82,6 +83,15 @@ def parse_roster(t: Any) -> list[RosterEntry]:
             acquisition_type=p.acquisitionType or None,
         )
         for p in t.roster
+    ]
+
+
+def parse_daily_lineups(teams: list[dict], scoring_period: int) -> list[DailySlot]:
+    """Every rostered player's slot on one day, from the raw mRoster `teams` array."""
+    return [
+        DailySlot(int(t["id"]), int(e["playerId"]), scoring_period, POSITION_MAP[int(e["lineupSlotId"])])
+        for t in teams
+        for e in t["roster"]["entries"]
     ]
 
 

@@ -11,7 +11,7 @@ from espn_api.basketball import League
 from fantasy_helper.calendar import load_calendar
 from fantasy_helper.categories import categories_from_scoring_items
 from fantasy_helper.config import Settings
-from fantasy_helper.domain import LeagueSnapshot, OpponentStats, PlayerGameStat
+from fantasy_helper.domain import DailySlot, LeagueSnapshot, OpponentStats, PlayerGameStat
 from fantasy_helper.espn import parse
 
 
@@ -49,6 +49,17 @@ def fetch_game_stats(league: League, scoring_period: int, free_agent_pool_size: 
         if g and g.player_id not in games:
             games[g.player_id] = g
     return list(games.values())
+
+
+def fetch_daily_lineups(league: League, scoring_periods: Collection[int]) -> list[DailySlot]:
+    """Every team's set lineup on each of these days; ESPN answers for future days too."""
+    return [
+        slot
+        for day in scoring_periods
+        for slot in parse.parse_daily_lineups(
+            league.espn_request.league_get(params={"view": "mRoster", "scoringPeriodId": day})["teams"], day
+        )
+    ]
 
 
 # ESPN's public (undocumented) NBA stats API; may change without notice.
@@ -95,6 +106,8 @@ def fetch_snapshot(settings: Settings, stored_game_days: Collection[int] = ()) -
         for day in days_to_fetch(int(league.scoringPeriodId), stored_game_days)
         for g in fetch_game_stats(league, day, settings.free_agent_pool_size)
     ]
+    week = calendar.week(int(league.currentMatchupPeriod))
+    lineup_days = [d for d in week.scoring_periods if d >= int(league.scoringPeriodId)]
     warnings = []
     try:
         opponent_stats = fetch_opponent_stats()
@@ -122,5 +135,6 @@ def fetch_snapshot(settings: Settings, stored_game_days: Collection[int] = ()) -
         first_tip_at=parse.first_tip(list(all_players.values()), int(league.scoringPeriodId)),
         game_stats=game_stats,
         opponent_stats=opponent_stats,
+        daily_lineups=fetch_daily_lineups(league, lineup_days),
         warnings=warnings,
     )

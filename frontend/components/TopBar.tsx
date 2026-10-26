@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import { RefreshButton } from "@/components/RefreshButton";
 import { useLeague } from "@/lib/api";
 import { dateTime } from "@/lib/format";
 
@@ -30,7 +31,10 @@ export function TopBar() {
         </nav>
         {league && (
           <div className="topbar-meta">
-            {league.name} · {run?.finished_at ? `data from ${dateTime(run.finished_at)}` : "no ingest run recorded"}
+            <span>
+              {league.name} · data from {dateTime(league.data_as_of)}
+            </span>
+            <RefreshButton />
           </div>
         )}
       </header>

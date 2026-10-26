@@ -93,6 +93,17 @@ class PlayerGameStat:
 
 
 @dataclass
+class DailySlot:
+    """A rostered player's lineup slot on one day, as set on ESPN. ESPN keeps a lineup
+    for every future day too, so this covers today through the end of the week."""
+
+    team_id: int
+    player_id: int
+    scoring_period: int
+    lineup_slot: str  # e.g. "PG", "UT", "BE"
+
+
+@dataclass
 class OpponentStats:
     """What opponents average against one NBA team: its per-game stats allowed."""
 
@@ -122,4 +133,5 @@ class LeagueSnapshot:
     first_tip_at: datetime | None = None  # earliest game today (current scoring period), UTC
     game_stats: list[PlayerGameStat] = field(default_factory=list)  # completed days fetched this run
     opponent_stats: list[OpponentStats] = field(default_factory=list)  # empty if that fetch failed
+    daily_lineups: list[DailySlot] = field(default_factory=list)  # set lineups, today through the week's end
     warnings: list[str] = field(default_factory=list)  # non-fatal fetch problems

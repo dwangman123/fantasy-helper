@@ -1,9 +1,17 @@
 // Types mirror backend/src/fantasy_helper/api/schemas.py.
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 export type Category = { key: string; is_percentage: boolean; reverse: boolean };
 
 export type Team = { team_id: number; name: string; abbrev: string; wins: number; losses: number; ties: number };
+
+export type IngestRun = {
+  id: number;
+  status: string;
+  started_at: string;
+  finished_at: string | null;
+  warnings: string[];
+};
 
 export type League = {
   season: number;
@@ -14,13 +22,8 @@ export type League = {
   week: { matchup_period: number; start: string; end: string; days: number; days_left: number };
   categories: Category[];
   teams: Team[];
-  last_ingest: {
-    id: number;
-    status: string;
-    started_at: string;
-    finished_at: string | null;
-    warnings: string[];
-  } | null;
+  data_as_of: string; // when the stored snapshot was fetched
+  last_ingest: IngestRun | null;
 };
 
 export type MatchupSummary = {
@@ -78,6 +81,25 @@ export type Player = {
   z_total: number;
 };
 
+// Counting stats plus FGM/FGA/FTM/FTA; percentages are derived from makes and attempts.
+export type Stats = Record<string, number>;
+
+export type LineupCell = {
+  slot: string | null;
+  opponent: string | null;
+  counts: boolean;
+  actual: boolean;
+  stats: Stats;
+};
+
+export type TeamLineup = {
+  team_id: number;
+  matchup_period: number;
+  days: { day: string; played: boolean; totals: Stats; starts: number; missed_starts: number | null }[];
+  players: { player: Player; cells: LineupCell[]; totals: Stats }[];
+  totals: Stats;
+};
+
 export type StreamRow = {
   add: Player;
   drop: Player | null;
@@ -133,10 +155,14 @@ export class ApiError extends Error {
   }
 }
 
-async function get<T>(path: string, params: Record<string, string | number | boolean | undefined> = {}): Promise<T> {
+async function get<T>(
+  path: string,
+  params: Record<string, string | number | boolean | undefined> = {},
+  init?: RequestInit,
+): Promise<T> {
   const query = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) if (v !== undefined) query.set(k, String(v));
-  const res = await fetch(`/api${path}${query.size ? `?${query}` : ""}`);
+  const res = await fetch(`/api${path}${query.size ? `?${query}` : ""}`, init);
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     throw new ApiError(res.status, body?.detail ?? `${res.status} ${res.statusText}`);
@@ -156,6 +182,23 @@ export const useMatchup = (teamId: number | undefined) =>
     enabled: teamId !== undefined,
     placeholderData: keepPreviousData,
   });
+
+export const useLineup = (teamId: number | undefined) =>
+  useQuery({
+    queryKey: ["lineup", teamId],
+    queryFn: () => get<TeamLineup>("/lineup", { team_id: teamId }),
+    enabled: teamId !== undefined,
+    placeholderData: keepPreviousData,
+  });
+
+// Runs the ingest on the backend, then refetches everything from the new snapshot.
+export const useRefresh = () => {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => get<IngestRun>("/refresh", {}, { method: "POST" }),
+    onSuccess: () => client.invalidateQueries(),
+  });
+};
 
 export const useWaivers = (teamId: number | undefined, sameDay: boolean) =>
   useQuery({

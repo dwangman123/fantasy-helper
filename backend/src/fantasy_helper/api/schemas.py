@@ -56,6 +56,7 @@ class LeagueOut(BaseModel):
     week: WeekOut
     categories: list[CategoryOut]
     teams: list[TeamOut]
+    data_as_of: UtcDatetime  # when the stored snapshot was fetched; a failed ingest leaves it as is
     last_ingest: IngestOut | None
 
 
@@ -125,6 +126,38 @@ class PlayerOut(BaseModel):
     injury_status: str | None
     z: dict[str, float]  # blended per-category z-scores
     z_total: float
+
+
+class LineupCell(BaseModel):
+    slot: str | None  # None: not on the team that day, or a played day without a box score
+    opponent: str | None  # None: no game
+    counts: bool  # a started game, so it adds to the team's totals
+    actual: bool  # box score; otherwise projected (rate x opponent factor x chance of playing)
+    stats: dict[str, float]  # counting stats plus FGM/FGA/FTM/FTA
+
+
+class LineupPlayer(BaseModel):
+    player: PlayerOut
+    cells: list[LineupCell]  # one per day of the week
+    totals: dict[str, float]  # counted games only
+
+
+class LineupDay(BaseModel):
+    day: date
+    played: bool
+    totals: dict[str, float]  # counted games only
+    starts: float  # started games; from today, weighted by the chance of playing
+    missed_starts: int | None  # extra games the best lineup would start; None once played
+
+
+class TeamLineup(BaseModel):
+    """One team's week by player and day, following the lineup set on ESPN."""
+
+    team_id: int
+    matchup_period: int
+    days: list[LineupDay]
+    players: list[LineupPlayer]
+    totals: dict[str, float]
 
 
 class BoardEntry(BaseModel):

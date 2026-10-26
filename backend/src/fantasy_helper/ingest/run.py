@@ -4,8 +4,10 @@ import logging
 import sys
 from datetime import UTC, datetime
 
+from sqlalchemy.orm import sessionmaker
+
 from fantasy_helper.calendar import load_calendar
-from fantasy_helper.config import get_settings
+from fantasy_helper.config import Settings, get_settings
 from fantasy_helper.db import models as m
 from fantasy_helper.db.queries import load_game_stat_days
 from fantasy_helper.db.session import get_sessionmaker
@@ -16,9 +18,10 @@ from fantasy_helper.predict import predict_current_week, store_predictions
 log = logging.getLogger("fantasy_helper.ingest")
 
 
-def run() -> m.IngestRun:
-    settings = get_settings()
-    Session = get_sessionmaker()
+def run(settings: Settings | None = None, session_factory: sessionmaker | None = None) -> m.IngestRun:
+    """Also run by the API's refresh endpoint, which passes its own settings and sessions."""
+    settings = settings or get_settings()
+    Session = session_factory or get_sessionmaker()
 
     with Session.begin() as session:
         run_row = m.IngestRun(season=settings.season, started_at=datetime.now(UTC), status="running")

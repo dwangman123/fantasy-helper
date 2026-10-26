@@ -132,8 +132,47 @@ h2 {
 
 .topbar-meta {
   margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
   color: var(--ink-2);
   font-size: 13px;
+}
+
+button.refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+button.refresh:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.spin {
+  display: inline-block;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+  }
+}
+
+.error-text {
+  color: var(--critical);
 }
 
 .stack {
@@ -304,6 +343,76 @@ tr.clickable {
 tr.clickable:hover td,
 tr.selected td {
   background: var(--page);
+}
+
+/* Lineup by day */
+
+.segmented {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.segmented button {
+  border: 0;
+  background: transparent;
+  color: var(--ink-2);
+  padding: 4px 12px;
+  cursor: pointer;
+}
+
+.segmented button[aria-pressed="true"] {
+  background: var(--page);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.lineup th[aria-current="date"] {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.lineup .sticky {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--surface);
+  min-width: 150px;
+}
+
+.lineup td.day {
+  min-width: 72px;
+}
+
+.lineup td.day .meta {
+  color: var(--ink-2);
+  font-size: 12px;
+}
+
+.lineup td.played .v {
+  font-weight: 600;
+}
+
+.lineup td.bench .v {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.lineup td.muted {
+  color: var(--muted);
+}
+
+.lineup tfoot td {
+  border-top: 1px solid var(--axis);
+  border-bottom: 0;
+  font-weight: 500;
+}
+
+.lineup tfoot .chip {
+  margin-top: 4px;
+  font-weight: 400;
 }
 
 /* Chips and badges */

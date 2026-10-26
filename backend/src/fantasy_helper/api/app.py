@@ -1,6 +1,6 @@
 """REST API over the stored snapshot; `fh-api` serves it with uvicorn.
 
-Everything comes from the latest ingest. Simulations are cached in memory per
+Everything comes from the latest ingest, which `POST /api/refresh` can also run. Simulations are cached in memory per
 snapshot (keyed by the league row's updated_at), so the next request after an
 ingest recomputes. Matchup and waiver views are from one team's side, mine
 unless `team_id` says otherwise.
@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from fantasy_helper.analytics.daily_lineup import team_week
 from fantasy_helper.analytics.waivers import category_board, side_view
 from fantasy_helper.api import schemas as s
 from fantasy_helper.config import Settings, get_settings
@@ -25,6 +26,8 @@ from fantasy_helper.context import LeagueContext, load_context
 from fantasy_helper.db import models as m
 from fantasy_helper.db import queries as q
 from fantasy_helper.db.session import get_sessionmaker
+from fantasy_helper.domain import Player
+from fantasy_helper.ingest.run import run as run_ingest
 from fantasy_helper.predict import WeekPredictions, predict_current_week
 from fantasy_helper.waivers import WaiverReport, waiver_report
 
@@ -95,6 +98,16 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+def _ingest_out(run: m.IngestRun) -> s.IngestOut:
+    return s.IngestOut(
+        id=run.id,
+        status=run.status,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
+        warnings=run.warnings or [],
+    )
+
+
 @router.get("/league", response_model=s.LeagueOut)
 def league(c: CtxDep):
     ctx = c.context()
@@ -114,15 +127,8 @@ def league(c: CtxDep):
         ),
         categories=[s.CategoryOut(key=x.key, is_percentage=x.is_percentage, reverse=x.reverse) for x in ctx.categories],
         teams=[s.TeamOut(**vars(t)) for t in q.load_teams(c.session, c.season)],
-        last_ingest=s.IngestOut(
-            id=run.id,
-            status=run.status,
-            started_at=run.started_at,
-            finished_at=run.finished_at,
-            warnings=run.warnings or [],
-        )
-        if run
-        else None,
+        data_as_of=c.league.updated_at,
+        last_ingest=_ingest_out(run) if run else None,
     )
 
 
@@ -209,19 +215,89 @@ def matchup(c: CtxDep, team_id: int | None = None):
     )
 
 
-def _player(ctx: LeagueContext, pid: int | None) -> s.PlayerOut | None:
+def _player(ctx: LeagueContext, pid: int | None, players: dict[int, Player] | None = None) -> s.PlayerOut | None:
+    """`players` overrides ctx.players, e.g. for someone dropped earlier in the week."""
     if pid is None:
         return None
-    p, z = ctx.players[pid], ctx.z[pid]
+    p, z = (players or ctx.players)[pid], ctx.z.get(pid)
     return s.PlayerOut(
         player_id=pid,
         name=p.name,
         pro_team=p.pro_team,
         position=p.position,
         injury_status=p.injury_status,
-        z=z.by_cat,
-        z_total=z.total,
+        z=z.by_cat if z else {},
+        z_total=z.total if z else 0.0,
     )
+
+
+@router.get("/lineup", response_model=s.TeamLineup)
+def lineup(c: CtxDep, team_id: int | None = None):
+    """One team's week by player and day: box scores for days played, then projections
+    that follow the lineup set on ESPN (not the simulation's best lineup)."""
+    team_id = c.settings.my_team_id if team_id is None else team_id
+    ctx = c.context()
+    if not any(r.team_id == team_id for r in ctx.rosters):
+        raise LookupError(f"No team {team_id} in season {c.season}")
+    days = list(ctx.week.scoring_periods)
+    slots = {(d.player_id, d.scoring_period): d.lineup_slot for d in q.load_daily_lineups(c.session, c.season, team_id)}
+    played_days = [d for d in days if d < ctx.scoring_period]
+    played = q.load_game_stats(c.session, c.season, team_id=team_id, scoring_periods=played_days)
+    ids = {pid for pid, _ in slots} | {g.player_id for g in played}
+    players = ctx.players | q.load_players(c.session, ids - ctx.players.keys())
+    schedule = q.load_schedule(c.session, c.season, days)
+    week = team_week(
+        days,
+        ctx.scoring_period,
+        ctx.slot_counts,
+        slots,
+        [g for g in played if g.player_id in players],
+        {pid: ctx.sim_player(pid, ctx.days_left) for pid in ids if pid in ctx.rates and pid in ctx.players},
+        {pid: schedule.get(players[pid].pro_team, {}) for pid in ids if pid in players},
+    )
+    return s.TeamLineup(
+        team_id=team_id,
+        matchup_period=ctx.matchup_period,
+        days=[
+            s.LineupDay(
+                day=ctx.calendar.date_for(day),
+                played=day < ctx.scoring_period,
+                totals=week.day_totals[i],
+                starts=week.starts[i],
+                missed_starts=week.missed_starts[i],
+            )
+            for i, day in enumerate(days)
+        ],
+        players=[
+            s.LineupPlayer(
+                player=_player(ctx, row.player_id, players),
+                cells=[
+                    s.LineupCell(slot=x.slot, opponent=x.opponent, counts=x.counts, actual=x.actual, stats=x.stats)
+                    for x in row.cells
+                ],
+                totals=row.totals,
+            )
+            for row in week.players
+        ],
+        totals=week.totals,
+    )
+
+
+@router.post("/refresh", response_model=s.IngestOut)
+def refresh(request: Request):
+    """Pull a fresh snapshot from ESPN now: the same job as `fh-ingest`, one at a time.
+    Cached results are keyed by the snapshot, so the next reads recompute."""
+    state = request.app.state
+    if not state.refresh_lock.acquire(blocking=False):
+        return JSONResponse(status_code=409, content={"detail": "A refresh is already running"})
+    try:
+        run_id = run_ingest(state.settings, state.sessionmaker).id
+    except Exception as exc:  # the run row records the failure; the client just needs the reason
+        return JSONResponse(status_code=502, content={"detail": f"Refresh from ESPN failed: {exc}"})
+    finally:
+        state.refresh_lock.release()
+    with state.sessionmaker() as session:  # re-read: predictions may have added warnings
+        return _ingest_out(session.get(m.IngestRun, run_id))
 
 
 @router.get("/waivers", response_model=s.WaiversOut)
@@ -303,6 +379,7 @@ def create_app(session_factory: sessionmaker | None = None, settings: Settings |
     app.state.sessionmaker = session_factory or get_sessionmaker()
     app.state.settings = settings or get_settings()
     app.state.cache = SnapshotCache()
+    app.state.refresh_lock = threading.Lock()
     app.include_router(router)
 
     @app.exception_handler(LookupError)

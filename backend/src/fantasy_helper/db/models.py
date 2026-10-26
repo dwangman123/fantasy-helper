@@ -79,6 +79,19 @@ class RosterEntry(Base):
     acquisition_type: Mapped[str | None] = mapped_column(String(20))
 
 
+class DailyLineup(Base):
+    """Each rostered player's slot per day, today through the end of the matchup week, as
+    set on ESPN. Replaced with the snapshot; past days' slots are on player_game_stats."""
+
+    __tablename__ = "daily_lineups"
+
+    season: Mapped[int] = mapped_column(Integer, primary_key=True)
+    scoring_period: Mapped[int] = mapped_column(Integer, primary_key=True)
+    player_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    team_id: Mapped[int] = mapped_column(Integer, index=True)
+    lineup_slot: Mapped[str] = mapped_column(String(10))
+
+
 class StatLine(Base):
     """Per-game averages for one player over one window (season, last_7, ..., projected)."""
 

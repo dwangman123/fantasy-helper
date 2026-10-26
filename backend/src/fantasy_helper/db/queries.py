@@ -7,7 +7,16 @@ from sqlalchemy.orm import Session
 
 from fantasy_helper.categories import KNOWN_CATEGORIES, Category
 from fantasy_helper.db import models as m
-from fantasy_helper.domain import Matchup, OpponentStats, Player, PlayerGameStat, RosterEntry, StatLine, Team
+from fantasy_helper.domain import (
+    DailySlot,
+    Matchup,
+    OpponentStats,
+    Player,
+    PlayerGameStat,
+    RosterEntry,
+    StatLine,
+    Team,
+)
 
 _STAT_KEYS_BY_COLUMN = {col: key for key, col in m.STAT_COLUMNS.items()}
 _CATEGORIES_BY_KEY = {c.key: c for c in KNOWN_CATEGORIES.values()}
@@ -28,6 +37,13 @@ def load_teams(session: Session, season: int) -> list[Team]:
 def load_rosters(session: Session, season: int) -> list[RosterEntry]:
     rows = session.scalars(select(m.RosterEntry).where(m.RosterEntry.season == season))
     return [RosterEntry(r.team_id, r.player_id, r.lineup_slot, r.acquisition_type) for r in rows]
+
+
+def load_daily_lineups(session: Session, season: int, team_id: int) -> list[DailySlot]:
+    rows = session.scalars(
+        select(m.DailyLineup).where(m.DailyLineup.season == season, m.DailyLineup.team_id == team_id)
+    )
+    return [DailySlot(r.team_id, r.player_id, r.scoring_period, r.lineup_slot) for r in rows]
 
 
 def load_stat_lines(session: Session, season: int, window: str) -> list[StatLine]:
@@ -100,8 +116,16 @@ def load_game_stat_days(session: Session, season: int) -> set[int]:
     return set(rows)
 
 
-def load_game_stats(session: Session, season: int) -> list[PlayerGameStat]:
-    rows = session.scalars(select(m.PlayerGameStat).where(m.PlayerGameStat.season == season))
+def load_game_stats(
+    session: Session, season: int, team_id: int | None = None, scoring_periods: Iterable[int] | None = None
+) -> list[PlayerGameStat]:
+    """Box scores for the season, optionally only one fantasy team's and only some days."""
+    query = select(m.PlayerGameStat).where(m.PlayerGameStat.season == season)
+    if team_id is not None:
+        query = query.where(m.PlayerGameStat.team_id == team_id)
+    if scoring_periods is not None:
+        query = query.where(m.PlayerGameStat.scoring_period.in_(list(scoring_periods)))
+    rows = session.scalars(query)
     return [
         PlayerGameStat(
             player_id=r.player_id,

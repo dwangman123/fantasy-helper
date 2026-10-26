@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from fantasy_helper.calendar import load_calendar
 from fantasy_helper.categories import KNOWN_CATEGORIES, categories_from_scoring_items
 from fantasy_helper.db import models as m
-from fantasy_helper.domain import LeagueSnapshot, Matchup, Player, ProGame, RosterEntry, StatLine, Team
+from fantasy_helper.domain import DailySlot, LeagueSnapshot, Matchup, Player, ProGame, RosterEntry, StatLine, Team
 from fantasy_helper.ingest.store import store_snapshot
 
 SEASON = 2027
@@ -127,6 +127,13 @@ def league_snapshot(matchup_period: int = 3, day_of_week: int = 3, n_free_agents
         fetched_at=datetime.now(UTC),
         lineup_slot_counts=SLOTS,
         scoring_type="H2H_MOST_CATEGORIES",
+        # Each set lineup is today's roster slot, carried through the week.
+        daily_lineups=[
+            DailySlot(r.team_id, r.player_id, day, r.lineup_slot)
+            for day in week.scoring_periods
+            if day >= today
+            for r in rosters
+        ],
     )
 
 

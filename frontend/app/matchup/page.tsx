@@ -3,6 +3,7 @@
 import { Suspense } from "react";
 
 import { LabelChip } from "@/components/LabelChip";
+import { LineupGrid } from "@/components/LineupGrid";
 import { OddsBar, OddsLegend } from "@/components/OddsBar";
 import { OddsHistory } from "@/components/OddsHistory";
 import { ErrorNotice, Loading } from "@/components/Status";
@@ -80,6 +81,8 @@ function Matchup() {
         </div>
         <CategoryTable rows={d.categories} me={me} opp={opp} />
       </section>
+
+      <LineupGrid key={d.team_id} categories={league.data.categories} me={me} opp={opp} />
 
       <div className="grid-2">
         <section className="card">

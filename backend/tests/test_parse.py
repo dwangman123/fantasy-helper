@@ -30,6 +30,16 @@ def test_pro_games_use_scoring_period_dates():
     assert parse.parse_pro_games(fake_player(pro_team="FA"), cal) == []
 
 
+def test_daily_lineups_name_each_slot():
+    entries = [{"playerId": 11, "lineupSlotId": 0}, {"playerId": 12, "lineupSlotId": 12}]
+    teams = [{"id": 4, "roster": {"entries": entries}}]
+    slots = parse.parse_daily_lineups(teams, 9)
+    assert [(d.team_id, d.player_id, d.scoring_period, d.lineup_slot) for d in slots] == [
+        (4, 11, 9, "PG"),
+        (4, 12, 9, "BE"),
+    ]
+
+
 def test_player_drops_bench_and_ir_slots():
     assert parse.parse_player(fake_player()).eligible_slots == ["SF", "F", "UT"]
 

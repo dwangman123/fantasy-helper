@@ -65,8 +65,53 @@ def test_waivers_rank_stream_and_hold(client):
     assert same_day["first_day"] == client.get("/api/league").json()["today"]
 
 
+def test_lineup_counts_started_games_only(client):
+    body = client.get("/api/lineup").json()
+    assert body["team_id"] == MY_TEAM and len(body["days"]) == 7
+    assert [d["played"] for d in body["days"]] == [True] * 3 + [False] * 4
+    assert len(body["players"]) == 14  # 13 roster spots plus IR
+    for p in body["players"]:
+        for cell in p["cells"]:
+            assert not cell["counts"] or (cell["slot"] not in ("BE", "IR") and cell["opponent"])
+    pts = sum(d["totals"]["PTS"] for d in body["days"])
+    assert pts > 0 and abs(pts - body["totals"]["PTS"]) < 1e-6
+    assert client.get("/api/lineup", params={"team_id": 99}).status_code == 404
+
+
 def test_unknown_team_is_404(client):
     assert client.get("/api/matchup", params={"team_id": 99}).status_code == 404
+
+
+def refresh_client(monkeypatch, fetch):
+    engine = create_engine("sqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False})
+    m.Base.metadata.create_all(engine)
+    monkeypatch.setattr("fantasy_helper.ingest.run.fetch_snapshot", fetch)
+    settings = Settings(season=SEASON, my_team_id=MY_TEAM, database_url="sqlite://")
+    return TestClient(create_app(sessionmaker(bind=engine, expire_on_commit=False), settings))
+
+
+def test_refresh_runs_the_ingest_one_at_a_time(monkeypatch):
+    with refresh_client(monkeypatch, lambda settings, days: league_snapshot()) as c:
+        run = c.post("/api/refresh").json()
+        assert run["status"] == "success"
+        assert c.get("/api/league").json()["last_ingest"]["id"] == run["id"]
+        lock = c.app.state.refresh_lock
+        with lock:
+            assert c.post("/api/refresh").status_code == 409
+
+
+def test_failed_refresh_reports_why_and_keeps_the_data(monkeypatch):
+    def fail(settings, days):
+        raise ConnectionError("ESPN unreachable")
+
+    with refresh_client(monkeypatch, lambda settings, days: league_snapshot()) as c:
+        c.post("/api/refresh")
+        before = c.get("/api/league").json()
+        monkeypatch.setattr("fantasy_helper.ingest.run.fetch_snapshot", fail)
+        r = c.post("/api/refresh")
+        assert r.status_code == 502 and "ESPN unreachable" in r.json()["detail"]
+        after = c.get("/api/league").json()
+        assert after["last_ingest"]["status"] == "failed" and after["data_as_of"] == before["data_as_of"]
 
 
 def test_cache_evicts_the_oldest_entry():
