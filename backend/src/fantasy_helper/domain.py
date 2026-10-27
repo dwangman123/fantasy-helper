@@ -45,6 +45,7 @@ class RosterEntry:
     player_id: int
     lineup_slot: str
     acquisition_type: str | None
+    acquired_at: datetime | None = None  # when his current team got him
 
 
 @dataclass
@@ -116,6 +117,22 @@ class LiveGame:
 
 
 @dataclass
+class Move:
+    """A player added to or dropped from a fantasy team, through free agency or waivers.
+    Trades aren't here: without a signed-in session ESPN lists them without their players,
+    so they come from roster entries acquired by trade instead."""
+
+    transaction_id: str
+    player_id: int
+    player_name: str | None
+    team_id: int
+    type: str  # ADD / DROP
+    kind: str  # FREEAGENT / WAIVER
+    scoring_period: int
+    at: datetime | None  # UTC
+
+
+@dataclass
 class OpponentStats:
     """What opponents average against one NBA team: its per-game stats allowed."""
 
@@ -147,4 +164,5 @@ class LeagueSnapshot:
     daily_lineups: list[DailySlot] = field(default_factory=list)  # set lineups, today through the week's end
     live_stats: list[PlayerGameStat] = field(default_factory=list)  # rostered players' lines today so far
     live_games: list[LiveGame] = field(default_factory=list)  # today's NBA games
+    moves: list[Move] = field(default_factory=list)  # adds and drops on the days fetched this run
     warnings: list[str] = field(default_factory=list)  # non-fatal fetch problems

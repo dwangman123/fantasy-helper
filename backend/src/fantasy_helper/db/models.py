@@ -77,6 +77,7 @@ class RosterEntry(Base):
     team_id: Mapped[int] = mapped_column(Integer, index=True)
     lineup_slot: Mapped[str] = mapped_column(String(10))
     acquisition_type: Mapped[str | None] = mapped_column(String(20))
+    acquired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class DailyLineup(Base):
@@ -180,6 +181,22 @@ class LiveGame(Base):
     period: Mapped[int] = mapped_column(Integer)
     clock: Mapped[str] = mapped_column(String(10))
     remaining: Mapped[float] = mapped_column(Float)  # share of the game still to play
+
+
+class Move(Base):
+    """Free-agent and waiver adds and drops. Upserted and never wiped: the league's move history."""
+
+    __tablename__ = "moves"
+
+    season: Mapped[int] = mapped_column(Integer, primary_key=True)
+    transaction_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    player_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    player_name: Mapped[str | None] = mapped_column(String(200))
+    team_id: Mapped[int] = mapped_column(Integer, index=True)
+    type: Mapped[str] = mapped_column(String(10))  # ADD / DROP
+    kind: Mapped[str] = mapped_column(String(20))  # FREEAGENT / WAIVER
+    scoring_period: Mapped[int] = mapped_column(Integer)
+    at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class OpponentStat(Base):

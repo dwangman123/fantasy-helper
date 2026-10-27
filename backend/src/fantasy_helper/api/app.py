@@ -19,15 +19,17 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from fantasy_helper.analytics.actuals import category_values
-from fantasy_helper.analytics.daily_lineup import team_week
+from fantasy_helper.analytics.daily_lineup import SLOT_ORDER, team_week
+from fantasy_helper.analytics.team_profile import DEFAULT_PUNT_Z, team_profiles
 from fantasy_helper.analytics.waivers import category_board, side_view
+from fantasy_helper.analytics.zscores import SPECIALTY_Z, PlayerZ, player_zscores, specialties
 from fantasy_helper.api import schemas as s
 from fantasy_helper.config import Settings, get_settings
 from fantasy_helper.context import LeagueContext, load_context
 from fantasy_helper.db import models as m
 from fantasy_helper.db import queries as q
 from fantasy_helper.db.session import get_sessionmaker
-from fantasy_helper.domain import LiveGame, Player
+from fantasy_helper.domain import LiveGame, Player, RosterEntry, StatLine
 from fantasy_helper.ingest.run import run as run_ingest
 from fantasy_helper.predict import WeekPredictions, predict_current_week
 from fantasy_helper.waivers import WaiverReport, waiver_report
@@ -315,6 +317,110 @@ def _game(g: LiveGame | None) -> s.GameOut | None:
     else:
         status = ""
     return s.GameOut(state=g.state, status=status, tip_at=g.tip_at)
+
+
+# Stat windows for the Team page; "model" is the blend of season and projection that predictions use.
+WINDOWS = ["model", "season", "last_7", "last_15", "last_30", "projected"]
+MOVES_SHOWN = 20
+
+
+def _window(c: Ctx, ctx: LeagueContext, window: str) -> tuple[list[StatLine], dict[int, PlayerZ]]:
+    """Every player's averages over one window, and z-scores against rostered players."""
+    if window == "model":
+        games = {x.player_id: x for x in q.load_stat_lines(c.session, c.season, "projected")}
+        games |= {x.player_id: x for x in q.load_stat_lines(c.session, c.season, "season")}
+        lines = [
+            StatLine(
+                pid, "model", games[pid].gp if pid in games else 0.0, games[pid].mpg if pid in games else 0.0, rates
+            )
+            for pid, rates in ctx.rates.items()
+        ]
+        return lines, ctx.z
+    if window not in WINDOWS:
+        raise ValueError(f"Unknown window {window!r}; one of {', '.join(WINDOWS)}")
+    lines = q.load_stat_lines(c.session, c.season, window)
+    return lines, player_zscores(lines, ctx.categories, baseline_ids={r.player_id for r in ctx.rosters})
+
+
+@router.get("/team", response_model=s.TeamDetail)
+def team(c: CtxDep, team_id: int | None = None, window: str = "model"):
+    """One team's roster with per-game averages and z-scores over a stat window, its
+    category profile against the league (team totals, ranks, punts), and its latest moves."""
+    team_id = c.settings.my_team_id if team_id is None else team_id
+    ctx = c.context()
+    entries = [r for r in ctx.rosters if r.team_id == team_id]
+    teams = {t.team_id: t for t in q.load_teams(c.session, c.season)}
+    if not entries or team_id not in teams:
+        raise LookupError(f"No team {team_id} in season {c.season}")
+    lines, z = c.cache.get(("window", c.key, window), lambda: _window(c, ctx, window))
+    profile = team_profiles(ctx.rosters, lines, ctx.categories)[team_id]
+    by_player = {x.player_id: x for x in lines}
+
+    def order(r: RosterEntry) -> tuple[int, float]:
+        rank = SLOT_ORDER.index(r.lineup_slot) if r.lineup_slot in SLOT_ORDER else len(SLOT_ORDER)
+        return rank, -(z[r.player_id].total if r.player_id in z else 0.0)
+
+    players = []
+    for r in sorted(entries, key=order):
+        line, pz = by_player.get(r.player_id), z.get(r.player_id)
+        by_cat = pz.by_cat if pz else {}
+        players.append(
+            s.TeamPlayer(
+                player=_player(ctx, r.player_id),
+                slot=r.lineup_slot,
+                acquisition_type=r.acquisition_type,
+                acquired_at=r.acquired_at,
+                gp=line.gp if line else None,
+                mpg=line.mpg if line else None,
+                per_game=line.per_game if line else None,
+                z=by_cat,
+                z_total=pz.total if pz else 0.0,
+                specialties=specialties(by_cat),
+            )
+        )
+    moves = [
+        s.MoveOut(at=x.at, type=x.type, kind=x.kind, player_id=x.player_id, player_name=x.player_name)
+        for x in q.load_moves(c.session, c.season, team_id, MOVES_SHOWN)
+    ] + [
+        s.MoveOut(
+            at=r.acquired_at,
+            type="TRADE",
+            kind="TRADE",
+            player_id=r.player_id,
+            player_name=ctx.players[r.player_id].name,
+        )
+        for r in entries
+        if r.acquisition_type == "TRADE"
+    ]
+    moves.sort(key=lambda x: x.at.timestamp() if x.at else 0.0, reverse=True)
+    return s.TeamDetail(
+        team=s.TeamOut(**vars(teams[team_id])),
+        window=window,
+        windows=WINDOWS,
+        profile=[
+            s.CategoryProfile(
+                key=cat.key,
+                value=profile.totals[cat.key],
+                rank=profile.ranks[cat.key],
+                z=profile.league_z[cat.key],
+                punt=cat.key in profile.punts,
+            )
+            for cat in ctx.categories
+        ],
+        punts=profile.punts,
+        players=players,
+        moves=moves[:MOVES_SHOWN],
+        notes=[
+            "Team values are the sum of the roster's per-game averages (IR excluded); FG% and FT% come from "
+            "summed makes and attempts.",
+            f"A punt is a category where the team sits more than {-DEFAULT_PUNT_Z:g} standard deviations below "
+            "the league's teams.",
+            f"Specialist tags mark categories a player is at least {SPECIALTY_Z:g} standard deviation above the "
+            "average rostered player in.",
+            "Trades show the players this team received and still has; ESPN lists trades without their players "
+            "unless signed in.",
+        ],
+    )
 
 
 @router.post("/refresh", response_model=s.IngestOut)

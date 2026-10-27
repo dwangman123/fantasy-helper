@@ -1,7 +1,7 @@
 """A synthetic league for service and API tests: 10 teams, a free-agent pool and a
 full-season NBA schedule, shaped like the real league but random (seeded)."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
 from sqlalchemy import create_engine
@@ -16,6 +16,7 @@ from fantasy_helper.domain import (
     LeagueSnapshot,
     LiveGame,
     Matchup,
+    Move,
     Player,
     PlayerGameStat,
     ProGame,
@@ -27,6 +28,7 @@ from fantasy_helper.ingest.store import store_snapshot
 
 SEASON = 2027
 MY_TEAM = 4
+TRADED_AT = datetime(2026, 10, 22, 18, 0, tzinfo=UTC)
 SLOTS = {"PG": 1, "SG": 1, "SF": 1, "PF": 1, "C": 1, "G": 1, "F": 1, "UT": 3, "BE": 3, "IR": 1}
 NBA = (
     "ATL BKN BOS CHA CHI CLE DAL DEN DET GSW HOU IND LAC LAL MEM "
@@ -130,6 +132,15 @@ def league_snapshot(matchup_period: int = 3, day_of_week: int = 3, n_free_agents
         totals = week_actuals(game_stats).get(team_id, {})
         return {**totals, "FG%": totals["FGM"] / totals["FGA"], "FT%": totals["FTM"] / totals["FTA"]} if totals else {}
 
+    # My team traded for its first player, then swapped a free agent in for its last bench player.
+    mine = [r for r in rosters if r.team_id == MY_TEAM]
+    rosters[rosters.index(mine[0])] = RosterEntry(MY_TEAM, mine[0].player_id, mine[0].lineup_slot, "TRADE", TRADED_AT)
+    added, dropped = mine[-2].player_id, 999
+    moves = [
+        Move("t1", added, f"Player {added}", MY_TEAM, "ADD", "FREEAGENT", today - 1, TRADED_AT + timedelta(days=1)),
+        Move("t1", dropped, "Dropped Player", MY_TEAM, "DROP", "FREEAGENT", today - 1, TRADED_AT + timedelta(days=1)),
+    ]
+
     pairs = [(MY_TEAM, 7), (1, 2), (3, 5), (6, 8), (9, 10)]
     matchups = [
         Matchup(100 * matchup_period + i, matchup_period, h, a, "UNDECIDED", "NONE", espn_totals(h), espn_totals(a))
@@ -164,6 +175,7 @@ def league_snapshot(matchup_period: int = 3, day_of_week: int = 3, n_free_agents
         game_stats=game_stats,
         live_stats=live_stats,
         live_games=live_games,
+        moves=moves,
     )
 
 

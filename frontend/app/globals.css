@@ -557,6 +557,47 @@ tr.selected td {
   font-size: 12px;
 }
 
+/* Team roster */
+
+.roster td.zcell {
+  border-radius: 4px;
+}
+
+.z-hi2 {
+  background: color-mix(in srgb, var(--win) 38%, transparent);
+}
+
+.z-hi1 {
+  background: color-mix(in srgb, var(--win) 16%, transparent);
+}
+
+.z-lo1 {
+  background: color-mix(in srgb, var(--loss) 16%, transparent);
+}
+
+.z-lo2 {
+  background: color-mix(in srgb, var(--loss) 38%, transparent);
+}
+
+.roster tfoot td {
+  border-top: 1px solid var(--axis);
+  border-bottom: 0;
+  font-weight: 500;
+}
+
+.specialties {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.chip.specialty {
+  border-color: color-mix(in srgb, var(--win) 45%, transparent);
+  background: color-mix(in srgb, var(--win) 12%, transparent);
+  font-weight: 600;
+}
+
 /* Chips and badges */
 
 .chip {

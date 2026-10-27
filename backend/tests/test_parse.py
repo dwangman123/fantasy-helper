@@ -180,3 +180,45 @@ def test_opponent_stats_read_the_opponent_blocks_and_map_team_codes():
     assert (o.pro_team, o.gp) == ("GSW", 1.0)
     assert o.per_game["REB"] == 49.0 and o.per_game["PTS"] == 121.0 and o.per_game["STL"] == 7.0
     assert o.per_game["FGA"] == 90.0 and o.per_game["TO"] == 17.0
+
+
+# Trimmed mTransactions2 rows as this public league returns them.
+TRANSACTIONS = [
+    {
+        "id": "3100bccf",
+        "type": "FREEAGENT",
+        "status": "EXECUTED",
+        "scoringPeriodId": 7,
+        "proposedDate": 1793055751757,
+        "processDate": None,
+        "items": [
+            {"type": "ADD", "playerId": 4278562, "fromTeamId": 0, "toTeamId": 6},
+            {"type": "DROP", "playerId": 5041955, "fromTeamId": 6, "toTeamId": 0},
+        ],
+    },
+    {
+        "id": "w1",
+        "type": "WAIVER",
+        "status": "CANCELED",
+        "scoringPeriodId": 7,
+        "items": [{"type": "ADD", "playerId": 1}],
+    },
+    {"id": "ce5bf78c", "type": "TRADE_ACCEPT", "scoringPeriodId": 1, "items": []},  # no status at all
+    {"id": "d1", "type": "DRAFT", "status": "EXECUTED", "items": [{"type": "DRAFT", "playerId": 2, "toTeamId": 4}]},
+    {"id": "r1", "type": "ROSTER", "status": "EXECUTED", "items": [{"type": "LINEUP", "playerId": 3}]},
+]
+
+
+def test_moves_are_executed_adds_and_drops_with_names():
+    moves = parse.parse_moves(TRANSACTIONS, {4278562: "New Guy"})
+    assert [(x.type, x.player_id, x.team_id, x.kind) for x in moves] == [
+        ("ADD", 4278562, 6, "FREEAGENT"),
+        ("DROP", 5041955, 6, "FREEAGENT"),
+    ]
+    assert moves[0].player_name == "New Guy" and moves[1].player_name is None
+    assert moves[0].at == datetime.fromtimestamp(1793055751.757, UTC)  # proposedDate when nothing later is set
+
+
+def test_acquisition_dates_come_from_roster_entries():
+    teams = [{"id": 4, "roster": {"entries": [{"playerId": 7, "acquisitionDate": 1792540741520}, {"playerId": 8}]}}]
+    assert parse.parse_acquired_at(teams) == {7: datetime.fromtimestamp(1792540741.52, UTC)}

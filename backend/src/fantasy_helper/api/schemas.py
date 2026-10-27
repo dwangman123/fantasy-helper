@@ -233,3 +233,43 @@ class WaiversOut(BaseModel):
     free_agents: int
     assumptions: list[str]
     n_sims: int
+
+
+class CategoryProfile(BaseModel):
+    key: str
+    value: float  # per game: the sum of the roster's averages (IR excluded); a fraction for percentages
+    rank: int  # 1 = best in the league
+    z: float  # against the other teams, higher is better
+    punt: bool  # z below the punt threshold
+
+
+class TeamPlayer(BaseModel):
+    player: PlayerOut
+    slot: str
+    acquisition_type: str | None  # DRAFT / ADD / TRADE
+    acquired_at: UtcDatetime | None
+    gp: float | None  # games behind this window's averages; None without a line
+    mpg: float | None
+    per_game: dict[str, float] | None  # counting stats plus makes and attempts
+    z: dict[str, float]  # this window, against rostered players
+    z_total: float
+    specialties: list[str]  # categories he stands out in, strongest first
+
+
+class MoveOut(BaseModel):
+    at: UtcDatetime | None
+    type: str  # ADD / DROP / TRADE (a player received in a trade)
+    kind: str  # FREEAGENT / WAIVER / TRADE
+    player_id: int
+    player_name: str | None
+
+
+class TeamDetail(BaseModel):
+    team: TeamOut
+    window: str
+    windows: list[str]
+    profile: list[CategoryProfile]
+    punts: list[str]
+    players: list[TeamPlayer]
+    moves: list[MoveOut]  # newest first
+    notes: list[str]

@@ -9,6 +9,7 @@ import { dateTime } from "@/lib/format";
 
 const LINKS = [
   { href: "/matchup", label: "Matchup" },
+  { href: "/team", label: "Team" },
   { href: "/waivers", label: "Waivers" },
 ];
 

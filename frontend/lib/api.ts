@@ -113,6 +113,40 @@ export type TeamLineup = {
   totals: Stats; // the week's projected final
 };
 
+export type CategoryProfile = { key: string; value: number; rank: number; z: number; punt: boolean };
+
+export type TeamPlayer = {
+  player: Player;
+  slot: string;
+  acquisition_type: string | null;
+  acquired_at: string | null;
+  gp: number | null;
+  mpg: number | null;
+  per_game: Stats | null; // null: no line in this window
+  z: Record<string, number>; // this window, against rostered players
+  z_total: number;
+  specialties: string[];
+};
+
+export type Move = {
+  at: string | null;
+  type: "ADD" | "DROP" | "TRADE";
+  kind: string;
+  player_id: number;
+  player_name: string | null;
+};
+
+export type TeamDetail = {
+  team: Team;
+  window: string;
+  windows: string[];
+  profile: CategoryProfile[];
+  punts: string[];
+  players: TeamPlayer[];
+  moves: Move[];
+  notes: string[];
+};
+
 export type StreamRow = {
   add: Player;
   drop: Player | null;
@@ -212,6 +246,14 @@ export const useRefresh = () => {
     onSuccess: () => client.invalidateQueries(),
   });
 };
+
+export const useTeam = (teamId: number | undefined, window: string) =>
+  useQuery({
+    queryKey: ["team", teamId, window],
+    queryFn: () => get<TeamDetail>("/team", { team_id: teamId, window }),
+    enabled: teamId !== undefined,
+    placeholderData: keepPreviousData,
+  });
 
 export const useWaivers = (teamId: number | undefined, sameDay: boolean) =>
   useQuery({

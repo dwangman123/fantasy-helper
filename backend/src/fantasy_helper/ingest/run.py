@@ -10,7 +10,7 @@ from fantasy_helper.analytics.actuals import espn_mismatches
 from fantasy_helper.calendar import load_calendar
 from fantasy_helper.config import Settings, get_settings
 from fantasy_helper.db import models as m
-from fantasy_helper.db.queries import load_game_stat_days
+from fantasy_helper.db.queries import load_game_stat_days, load_last_move_day
 from fantasy_helper.db.session import get_sessionmaker
 from fantasy_helper.espn.client import fetch_snapshot
 from fantasy_helper.ingest.store import store_snapshot
@@ -28,10 +28,11 @@ def run(settings: Settings | None = None, session_factory: sessionmaker | None =
         run_row = m.IngestRun(season=settings.season, started_at=datetime.now(UTC), status="running")
         session.add(run_row)
         stored_game_days = load_game_stat_days(session, settings.season)
+        last_move_day = load_last_move_day(session, settings.season)
     run_id = run_row.id
 
     try:
-        snap = fetch_snapshot(settings, stored_game_days)
+        snap = fetch_snapshot(settings, stored_game_days, last_move_day)
         calendar = load_calendar(settings.season)
         warnings = calendar.validate_against_espn(snap.matchup_ids)
         for w in warnings:

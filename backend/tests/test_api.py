@@ -109,6 +109,26 @@ def test_lineup_shows_todays_games_live(client):
     assert abs(day["actual"]["PTS"] - sum(c["stats"]["PTS"] for c in started_live)) < 1e-6
 
 
+def test_team_page_profiles_the_roster_and_lists_moves(client):
+    body = client.get("/api/team").json()
+    assert body["team"]["team_id"] == MY_TEAM and body["window"] == "model"
+    profile = {p["key"]: p for p in body["profile"]}
+    assert len(profile) == 9 and all(1 <= p["rank"] <= 10 for p in profile.values())
+    assert set(body["punts"]) == {k for k, p in profile.items() if p["punt"]}
+    assert len(body["players"]) == 14 and body["players"][-1]["slot"] == "IR"
+    for p in body["players"]:
+        assert all(p["z"][k] >= 1.0 for k in p["specialties"]) and len(p["specialties"]) <= 2
+    assert [(m["type"], m["kind"]) for m in body["moves"]] == [
+        ("ADD", "FREEAGENT"),
+        ("DROP", "FREEAGENT"),
+        ("TRADE", "TRADE"),
+    ]
+    season = client.get("/api/team", params={"window": "season"}).json()
+    assert season["window"] == "season" and season["players"][0]["per_game"] != body["players"][0]["per_game"]
+    assert client.get("/api/team", params={"window": "career"}).status_code == 400
+    assert client.get("/api/team", params={"team_id": 99}).status_code == 404
+
+
 def test_unknown_team_is_404(client):
     assert client.get("/api/matchup", params={"team_id": 99}).status_code == 404
 
@@ -122,7 +142,7 @@ def refresh_client(monkeypatch, fetch):
 
 
 def test_refresh_runs_the_ingest_one_at_a_time(monkeypatch):
-    with refresh_client(monkeypatch, lambda settings, days: league_snapshot()) as c:
+    with refresh_client(monkeypatch, lambda settings, *args: league_snapshot()) as c:
         run = c.post("/api/refresh").json()
         assert run["status"] == "success"
         assert c.get("/api/league").json()["last_ingest"]["id"] == run["id"]
@@ -132,10 +152,10 @@ def test_refresh_runs_the_ingest_one_at_a_time(monkeypatch):
 
 
 def test_failed_refresh_reports_why_and_keeps_the_data(monkeypatch):
-    def fail(settings, days):
+    def fail(settings, *args):
         raise ConnectionError("ESPN unreachable")
 
-    with refresh_client(monkeypatch, lambda settings, days: league_snapshot()) as c:
+    with refresh_client(monkeypatch, lambda settings, *args: league_snapshot()) as c:
         c.post("/api/refresh")
         before = c.get("/api/league").json()
         monkeypatch.setattr("fantasy_helper.ingest.run.fetch_snapshot", fail)

@@ -2,7 +2,7 @@
 
 from collections.abc import Iterable
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from fantasy_helper.categories import KNOWN_CATEGORIES, Category
@@ -11,6 +11,7 @@ from fantasy_helper.domain import (
     DailySlot,
     LiveGame,
     Matchup,
+    Move,
     OpponentStats,
     Player,
     PlayerGameStat,
@@ -37,7 +38,7 @@ def load_teams(session: Session, season: int) -> list[Team]:
 
 def load_rosters(session: Session, season: int) -> list[RosterEntry]:
     rows = session.scalars(select(m.RosterEntry).where(m.RosterEntry.season == season))
-    return [RosterEntry(r.team_id, r.player_id, r.lineup_slot, r.acquisition_type) for r in rows]
+    return [RosterEntry(r.team_id, r.player_id, r.lineup_slot, r.acquisition_type, r.acquired_at) for r in rows]
 
 
 def load_daily_lineups(session: Session, season: int, team_id: int) -> list[DailySlot]:
@@ -148,6 +149,24 @@ def load_day_slots(session: Session, season: int, scoring_period: int) -> dict[i
         )
     )
     return {pid: slot for pid, slot in rows}
+
+
+def load_moves(session: Session, season: int, team_id: int, limit: int) -> list[Move]:
+    """One team's latest adds and drops, newest first."""
+    rows = session.scalars(
+        select(m.Move)
+        .where(m.Move.season == season, m.Move.team_id == team_id)
+        .order_by(m.Move.at.desc(), m.Move.type)
+        .limit(limit)
+    )
+    return [
+        Move(r.transaction_id, r.player_id, r.player_name, r.team_id, r.type, r.kind, r.scoring_period, r.at)
+        for r in rows
+    ]
+
+
+def load_last_move_day(session: Session, season: int) -> int | None:
+    return session.scalar(select(func.max(m.Move.scoring_period)).where(m.Move.season == season))
 
 
 def _game_stat(r: m.PlayerGameStat | m.LiveGameStat) -> PlayerGameStat:

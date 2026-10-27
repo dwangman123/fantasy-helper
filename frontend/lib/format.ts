@@ -27,6 +27,9 @@ export const weekday = (iso: string) =>
 export const dateTime = (iso: string) =>
   new Date(iso).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" });
 
+// The local day of a timestamp, e.g. "Oct 21".
+export const dayOf = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+
 export const timeOfDay = (iso: string) => new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 
 // Percentage categories come from their makes and attempts.

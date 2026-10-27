@@ -16,6 +16,7 @@ from fantasy_helper.domain import (
     DailySlot,
     LiveGame,
     Matchup,
+    Move,
     OpponentStats,
     Player,
     PlayerGameStat,
@@ -85,6 +86,51 @@ def parse_roster(t: Any) -> list[RosterEntry]:
         )
         for p in t.roster
     ]
+
+
+def _from_epoch_ms(ms: Any) -> datetime | None:
+    return datetime.fromtimestamp(ms / 1000, UTC) if ms else None
+
+
+def parse_acquired_at(teams: list[dict]) -> dict[int, datetime]:
+    """Player -> when his team acquired him, from the raw mRoster `teams` array."""
+    return {
+        int(e["playerId"]): at
+        for t in teams
+        for e in t["roster"]["entries"]
+        if (at := _from_epoch_ms(e.get("acquisitionDate")))
+    }
+
+
+_MOVE_KINDS = {"FREEAGENT", "WAIVER"}
+
+
+def parse_moves(transactions: list[dict], names: dict[int, str]) -> list[Move]:
+    """Executed free-agent and waiver adds and drops from the raw mTransactions2 list.
+    Fields are read defensively: some rows have no status, and dates are often missing."""
+    out = []
+    for t in transactions:
+        if t.get("type") not in _MOVE_KINDS or t.get("status") != "EXECUTED":
+            continue
+        at = _from_epoch_ms(t.get("processDate") or t.get("acceptedDate") or t.get("proposedDate"))
+        for item in t.get("items") or []:
+            kind, pid = item.get("type"), item.get("playerId")
+            team_id = {"ADD": item.get("toTeamId"), "DROP": item.get("fromTeamId")}.get(kind)
+            if not team_id or pid is None:
+                continue
+            out.append(
+                Move(
+                    str(t["id"]),
+                    int(pid),
+                    names.get(int(pid)),
+                    int(team_id),
+                    kind,
+                    t["type"],
+                    int(t.get("scoringPeriodId") or 0),
+                    at,
+                )
+            )
+    return out
 
 
 def parse_daily_lineups(teams: list[dict], scoring_period: int) -> list[DailySlot]:

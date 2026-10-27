@@ -30,12 +30,18 @@ button runs the ingest (`POST /api/refresh`).
 Still open: what the league's add limit means and when a pickup can first play (the
 rankings assume the next day; see PROJECT_PLAN.md).
 
-**Week 3c (live scoring, head-to-head Matchup page): in progress.** A Refresh during games
-is live: totals so far include today's lines, games that have tipped are locked into their
-set slots, and only the rest of each live game is projected (see *Live scoring* below). The
-Matchup page is picked by matchup rather than team and shows both teams head to head: each
-category's totals now and projected on either side of its win / tie / loss bar, and the lineup
-one day at a time (box scores, today's live lines with the game clock, projections ahead).
+**Week 3c (live scoring, head-to-head Matchup page, Team page): done.** A Refresh during
+games is live: totals so far include today's lines, games that have tipped are locked into
+their set slots, and only the rest of each live game is projected (see *Live scoring* below).
+The Matchup page is picked by matchup rather than team and shows both teams head to head:
+each category's totals now and projected on either side of its win / tie / loss bar, and the
+lineup one day at a time (box scores, today's live lines with the game clock, projections
+ahead). A Team page shows any team's roster with per-game averages over a chosen stat window,
+cells shaded by z-score and specialist tags (categories a player is 1+ SD above the rostered
+average in), the team's per-game category totals with league ranks and inferred punts, and its
+recent adds, drops and trades.
+Still to verify: that ESPN's daily rosters update box scores during a game (checked only after
+games ended).
 
 ## Backend quickstart
 
@@ -115,6 +121,10 @@ frontend/            Next.js + TanStack Query: Matchup and Waivers pages
   every team's slots from today through the end of the week (`daily_lineups`); past days' slots
   come from the box scores. Win odds still assume the best lineup each day, so the by-day view's
   totals can differ from the odds' projected finals.
+- **Moves**: adds and drops come from ESPN's transactions view, re-read for the last two weeks
+  (or since the latest stored move) on each ingest and kept in `moves`. Without a signed-in
+  session ESPN lists trades without their players, so trades come from roster entries acquired
+  by trade, with the acquisition date; a player traded away shows only on his new team.
 - **History tables** are never wiped: `player_game_stats` (daily box scores; missing days are
   backfilled, and the current week's days are re-fetched for stat corrections) and `matchup_predictions`
   (one row per matchup per run, for tracking odds through the week and for backtests).

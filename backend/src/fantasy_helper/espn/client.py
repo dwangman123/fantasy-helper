@@ -4,6 +4,7 @@ plus NBA opponent stats from ESPN's public site API."""
 import json
 import urllib.request
 from collections.abc import Collection
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 
 from espn_api.basketball import League
@@ -11,7 +12,7 @@ from espn_api.basketball import League
 from fantasy_helper.calendar import load_calendar
 from fantasy_helper.categories import categories_from_scoring_items
 from fantasy_helper.config import Settings
-from fantasy_helper.domain import DailySlot, LeagueSnapshot, LiveGame, OpponentStats, PlayerGameStat
+from fantasy_helper.domain import DailySlot, LeagueSnapshot, LiveGame, Move, OpponentStats, PlayerGameStat
 from fantasy_helper.espn import parse
 
 
@@ -48,18 +49,49 @@ def fetch_game_stats(league: League, scoring_period: int, free_agent_pool_size: 
     return list(games.values())
 
 
-def fetch_daily_lineups(
-    league: League, scoring_periods: Collection[int], today: int
-) -> tuple[list[DailySlot], list[PlayerGameStat]]:
+@dataclass
+class RosterDays:
+    slots: list[DailySlot]  # each team's set lineup per day
+    live: list[PlayerGameStat]  # today's box scores so far
+    acquired_at: dict[int, datetime]  # player -> when his team got him
+
+
+def fetch_daily_lineups(league: League, scoring_periods: Collection[int], today: int) -> RosterDays:
     """Every team's set lineup on each of these days (ESPN answers for future days too),
-    plus today's box scores so far, which come in the same response."""
-    slots, live = [], []
+    plus today's box scores so far and acquisition dates, which come in the same responses."""
+    out = RosterDays([], [], {})
     for day in scoring_periods:
         teams = league.espn_request.league_get(params={"view": "mRoster", "scoringPeriodId": day})["teams"]
-        slots += parse.parse_daily_lineups(teams, day)
+        out.slots += parse.parse_daily_lineups(teams, day)
         if day == today:
-            live = parse.parse_day_stats(teams, day)
-    return slots, live
+            out.live = parse.parse_day_stats(teams, day)
+            out.acquired_at = parse.parse_acquired_at(teams)
+    return out
+
+
+# Days of adds and drops re-read on each ingest when none are stored yet, and at most.
+MOVE_DAYS = 14
+
+
+def move_days(today: int, last_stored: int | None) -> list[int]:
+    """From the day before the latest stored move (it may have had more), within MOVE_DAYS."""
+    first = max(1, today - MOVE_DAYS, (last_stored or 0) - 1)
+    return list(range(first, today + 1))
+
+
+def fetch_moves(league: League, scoring_periods: Collection[int]) -> list[Move]:
+    names = {k: v for k, v in league.player_map.items() if isinstance(k, int)}
+    return [
+        move
+        for day in scoring_periods
+        for move in parse.parse_moves(
+            league.espn_request.league_get(params={"view": "mTransactions2", "scoringPeriodId": day}).get(
+                "transactions"
+            )
+            or [],
+            names,
+        )
+    ]
 
 
 # ESPN's public (undocumented) NBA APIs; may change without notice.
@@ -85,7 +117,9 @@ def fetch_opponent_stats() -> list[OpponentStats]:
     return stats
 
 
-def fetch_snapshot(settings: Settings, stored_game_days: Collection[int] = ()) -> LeagueSnapshot:
+def fetch_snapshot(
+    settings: Settings, stored_game_days: Collection[int] = (), last_move_day: int | None = None
+) -> LeagueSnapshot:
     league = League(
         league_id=settings.league_id,
         year=settings.season,
@@ -116,7 +150,7 @@ def fetch_snapshot(settings: Settings, stored_game_days: Collection[int] = ()) -
         for day in days_to_fetch(today, stored_game_days, week.scoring_periods)
         for g in fetch_game_stats(league, day, settings.free_agent_pool_size)
     ]
-    daily_lineups, live_stats = fetch_daily_lineups(league, [d for d in week.scoring_periods if d >= today], today)
+    roster_days = fetch_daily_lineups(league, [d for d in week.scoring_periods if d >= today], today)
     warnings = []
     try:
         opponent_stats = fetch_opponent_stats()
@@ -138,7 +172,11 @@ def fetch_snapshot(settings: Settings, stored_game_days: Collection[int] = ()) -
         current_scoring_period=int(league.scoringPeriodId),
         teams=[parse.parse_team(t) for t in league.teams],
         players=[parse.parse_player(p) for p in all_players.values()],
-        rosters=[e for t in league.teams for e in parse.parse_roster(t)],
+        rosters=[
+            replace(e, acquired_at=roster_days.acquired_at.get(e.player_id))
+            for t in league.teams
+            for e in parse.parse_roster(t)
+        ],
         stat_lines=[s for p in all_players.values() for s in parse.parse_stat_lines(p, settings.season)],
         pro_games=list(pro_games.values()),
         matchups=parse.parse_matchups(schedule, categories),
@@ -148,8 +186,9 @@ def fetch_snapshot(settings: Settings, stored_game_days: Collection[int] = ()) -
         scoring_type=raw_settings["scoringSettings"].get("scoringType"),
         game_stats=game_stats,
         opponent_stats=opponent_stats,
-        daily_lineups=daily_lineups,
-        live_stats=live_stats,
+        daily_lineups=roster_days.slots,
+        live_stats=roster_days.live,
         live_games=live_games,
+        moves=fetch_moves(league, move_days(today, last_move_day)),
         warnings=warnings,
     )

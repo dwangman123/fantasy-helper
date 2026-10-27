@@ -55,6 +55,7 @@ def store_snapshot(session: Session, snap: LeagueSnapshot) -> dict[str, int]:
             team_id=r.team_id,
             lineup_slot=r.lineup_slot,
             acquisition_type=r.acquisition_type,
+            acquired_at=r.acquired_at,
         )
         for r in snap.rosters
     )
@@ -154,6 +155,20 @@ def store_snapshot(session: Session, snap: LeagueSnapshot) -> dict[str, int]:
                 **{col: g.stats[key] for key, col in m.STAT_COLUMNS.items()},
             )
         )
+    for x in snap.moves:  # history, like game logs
+        session.merge(
+            m.Move(
+                season=season,
+                transaction_id=x.transaction_id,
+                player_id=x.player_id,
+                player_name=x.player_name,
+                team_id=x.team_id,
+                type=x.type,
+                kind=x.kind,
+                scoring_period=x.scoring_period,
+                at=x.at,
+            )
+        )
     return {
         "teams": len(snap.teams),
         "players": len(snap.players),
@@ -166,4 +181,5 @@ def store_snapshot(session: Session, snap: LeagueSnapshot) -> dict[str, int]:
         "opponent_stats": len(snap.opponent_stats),
         "live_stats": len(snap.live_stats),
         "live_games": len(snap.live_games),
+        "moves": len(snap.moves),
     }

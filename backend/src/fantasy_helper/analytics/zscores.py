@@ -84,3 +84,14 @@ def player_zscores(
             by_cat[cat.key] = -z if cat.reverse else z
         out[s.player_id] = PlayerZ(s.player_id, by_cat)
     return out
+
+
+# A player is a specialist in a category he's at least this many standard deviations above
+# the rostered average in; a few elite players clear it in four or five, so show the top two.
+SPECIALTY_Z, SPECIALTIES_SHOWN = 1.0, 2
+
+
+def specialties(by_cat: dict[str, float]) -> list[str]:
+    """His standout categories, strongest first."""
+    strong = sorted((k for k, z in by_cat.items() if z >= SPECIALTY_Z), key=lambda k: -by_cat[k])
+    return strong[:SPECIALTIES_SHOWN]
