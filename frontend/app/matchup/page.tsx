@@ -2,15 +2,15 @@
 
 import { Suspense } from "react";
 
-import { LabelChip } from "@/components/LabelChip";
-import { LineupGrid } from "@/components/LineupGrid";
+import { CategoryH2H } from "@/components/CategoryH2H";
+import { DayLineup } from "@/components/DayLineup";
+import { MatchupSelect, sides, useMatchupParam } from "@/components/MatchupSelect";
 import { OddsBar, OddsLegend } from "@/components/OddsBar";
 import { OddsHistory } from "@/components/OddsHistory";
 import { ErrorNotice, Loading } from "@/components/Status";
-import { TeamSelect, useTeamParam } from "@/components/TeamSelect";
 import { Tile } from "@/components/Tile";
-import { type CategoryOdds, type MatchupSummary, type Team, useLeague, useMatchup, useMatchups } from "@/lib/api";
-import { pct, shortDate, stat } from "@/lib/format";
+import { type MatchupSummary, type Team, useLeague, useMatchup, useMatchups } from "@/lib/api";
+import { pct, shortDate } from "@/lib/format";
 
 export default function MatchupPage() {
   return (
@@ -22,17 +22,22 @@ export default function MatchupPage() {
 
 function Matchup() {
   const league = useLeague();
-  const [teamId, setTeam] = useTeamParam(league.data?.my_team_id);
-  const detail = useMatchup(teamId);
   const scoreboard = useMatchups();
-  const error = league.error ?? detail.error;
+  const myId = league.data?.my_team_id;
+  const mine = scoreboard.data?.find((r) => r.home_team_id === myId || r.away_team_id === myId);
+  const [matchupId, setMatchup] = useMatchupParam(mine?.espn_id);
+  const row = scoreboard.data?.find((r) => r.espn_id === matchupId) ?? mine ?? scoreboard.data?.[0];
+  const [leftId, rightId] = row && myId !== undefined ? sides(row, myId) : [undefined, undefined];
+  const detail = useMatchup(leftId);
+  const error = league.error ?? scoreboard.error ?? detail.error;
   if (error) return <ErrorNotice error={error} />;
-  if (!league.data || !detail.data || teamId === undefined) return <Loading what="matchup" />;
+  if (!league.data || !scoreboard.data || !row || !detail.data || rightId === undefined || myId === undefined)
+    return <Loading what="matchup" />;
 
   const d = detail.data;
   const teams = Object.fromEntries(league.data.teams.map((t) => [t.team_id, t]));
-  const me = teams[d.team_id];
-  const opp = teams[d.opponent_id];
+  const left = teams[d.team_id];
+  const right = teams[d.opponent_id];
   const first = d.week_days[0];
   const last = d.week_days[d.week_days.length - 1];
   return (
@@ -40,24 +45,24 @@ function Matchup() {
       <div className="row" style={{ justifyContent: "space-between" }}>
         <div>
           <h1>
-            Week {d.matchup_period}: {me.name} vs {opp.name}
+            Week {d.matchup_period}: {left.name} vs {right.name}
           </h1>
           <div className="sub">
             {shortDate(first)} – {shortDate(last)} · {d.days_left.length} of {d.week_days.length} days left ·{" "}
             {d.n_sims.toLocaleString()} simulations
           </div>
         </div>
-        <TeamSelect teams={league.data.teams} value={teamId} myTeamId={league.data.my_team_id} onChange={setTeam} />
+        <MatchupSelect rows={scoreboard.data} teams={teams} value={row.espn_id} myTeamId={myId} onChange={setMatchup} />
       </div>
 
       <section className="card">
-        <div className="tile-label">Chance to win the matchup</div>
-        <div className="hero">{pct(d.p_win)}</div>
-        <div className="sub" style={{ marginTop: 6 }}>
-          Tie {pct(d.p_tie)} · Loss {pct(d.p_loss)}
-        </div>
-        <div style={{ marginTop: 16 }}>
-          <OddsBar win={d.p_win} tie={d.p_tie} loss={d.p_loss} height={14} />
+        <div className="h2h-hero">
+          <Side team={left} p={d.p_win} color="var(--win)" />
+          <div className="mid">
+            <div className="sub">Chance to win the matchup · tie {pct(d.p_tie)}</div>
+            <OddsBar win={d.p_win} tie={d.p_tie} loss={d.p_loss} height={14} labels={[left.abbrev, "Tie", right.abbrev]} />
+          </div>
+          <Side team={right} p={d.p_loss} color="var(--loss)" align="right" />
         </div>
         <div className="tiles">
           <Tile
@@ -76,19 +81,22 @@ function Matchup() {
 
       <section className="card">
         <div className="card-head">
-          <h2>Categories</h2>
-          <OddsLegend />
+          <div>
+            <h2>Categories</h2>
+            <div className="sub">Now includes today&apos;s games so far; Final is the projected end of the week</div>
+          </div>
+          <OddsLegend labels={[`${left.abbrev} wins`, "Tie", `${right.abbrev} wins`]} />
         </div>
-        <CategoryTable rows={d.categories} me={me} opp={opp} />
+        <CategoryH2H rows={d.categories} left={left} right={right} />
       </section>
 
-      <LineupGrid key={d.team_id} categories={league.data.categories} me={me} opp={opp} />
+      <DayLineup key={d.espn_id} categories={league.data.categories} left={left} right={right} />
 
       <div className="grid-2">
         <section className="card">
           <div className="card-head">
-            <h2>Win odds this week</h2>
-            <span className="sub">after each daily ingest</span>
+            <h2>{left.abbrev}&apos;s win odds this week</h2>
+            <span className="sub">after each refresh</span>
           </div>
           <OddsHistory points={d.history} weekStart={first} days={d.week_days.length} />
         </section>
@@ -97,55 +105,25 @@ function Matchup() {
             <h2>All matchups</h2>
             <OddsLegend labels={["Home", "Tie", "Away"]} />
           </div>
-          {scoreboard.data ? (
-            <Scoreboard rows={scoreboard.data} teams={teams} selected={d.espn_id} onPick={setTeam} />
-          ) : (
-            <Loading what="matchups" />
-          )}
+          <Scoreboard rows={scoreboard.data} teams={teams} selected={d.espn_id} onPick={setMatchup} />
         </section>
       </div>
     </div>
   );
 }
 
-function CategoryTable({ rows, me, opp }: { rows: CategoryOdds[]; me: Team; opp: Team }) {
+function Side({ team, p, color, align }: { team: Team; p: number; color: string; align?: "right" }) {
   return (
-    <div className="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Category</th>
-            <th className="num hide-sm">Now {me.abbrev}</th>
-            <th className="num hide-sm">Now {opp.abbrev}</th>
-            <th className="num hide-sm">Final {me.abbrev}</th>
-            <th className="num hide-sm">Final {opp.abbrev}</th>
-            <th style={{ width: "28%" }}>Win · tie · loss</th>
-            <th className="num">P(win)</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((c) => (
-            <tr key={c.key}>
-              <td>
-                <strong>{c.key}</strong>
-                {c.reverse && <div className="sub">fewer wins</div>}
-              </td>
-              <td className="num hide-sm">{stat(c.now_me, c.is_percentage)}</td>
-              <td className="num hide-sm">{stat(c.now_opp, c.is_percentage)}</td>
-              <td className="num hide-sm">{stat(c.proj_me, c.is_percentage)}</td>
-              <td className="num hide-sm">{stat(c.proj_opp, c.is_percentage)}</td>
-              <td>
-                <OddsBar win={c.p_win} tie={c.p_tie} loss={c.p_loss} />
-              </td>
-              <td className="num">{pct(c.p_win)}</td>
-              <td>
-                <LabelChip label={c.label} />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className={`side${align === "right" ? " right" : ""}`}>
+      <div className="tile-label">
+        <span className="key" style={{ background: color }} />
+        {team.name}
+      </div>
+      <div className="hero">{pct(p)}</div>
+      <div className="sub">
+        {team.wins}-{team.losses}
+        {team.ties ? `-${team.ties}` : ""} this season
+      </div>
     </div>
   );
 }
@@ -154,7 +132,7 @@ type ScoreboardProps = {
   rows: MatchupSummary[];
   teams: Record<number, Team>;
   selected: number;
-  onPick: (teamId: number) => void;
+  onPick: (espnId: number) => void;
 };
 
 function Scoreboard({ rows, teams, selected, onPick }: ScoreboardProps) {
@@ -165,7 +143,7 @@ function Scoreboard({ rows, teams, selected, onPick }: ScoreboardProps) {
           <tr
             key={r.espn_id}
             className={`clickable${r.espn_id === selected ? " selected" : ""}`}
-            onClick={() => onPick(r.home_team_id)}
+            onClick={() => onPick(r.espn_id)}
           >
             <td>{teams[r.home_team_id]?.abbrev}</td>
             <td className="num">{pct(r.p_home)}</td>

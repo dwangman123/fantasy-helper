@@ -35,6 +35,7 @@ class DayCell:
     stats: dict[str, float]  # what to show: the box score, or the projection before tip; keyed by STAT_KEYS
     projected: dict[str, float]  # the game's projected final: equals `stats` except during a live game
     game: LiveGame | None = None  # today's game state; None on other days
+    start: float = 0.0  # games this cell starts: 1 once played, else his chance of playing; 0 if it doesn't count
 
 
 @dataclass
@@ -51,7 +52,7 @@ class TeamWeek:
     day_actual: list[dict[str, float]]  # counted box scores per day (today's so far); zeros ahead
     day_projected: list[dict[str, float]]  # counted projected finals per day
     totals: dict[str, float]  # the week's projected final
-    starts: list[float]  # started games per day; from today, weighted by the chance of playing
+    starts: list[float]  # started games per day; ahead of a game, weighted by his chance of playing
     missed_starts: list[int | None]  # extra games the best lineup would start; None for days played
 
 
@@ -118,27 +119,32 @@ def team_week(
                     actual=True,
                     stats=stats,
                     projected=stats,
+                    start=1.0 if g is not None and _starts(g.lineup_slot) else 0.0,
                 )
             else:
                 slot = slots.get((pid, day))
                 opponent = opponents.get(pid, {}).get(day) if slot is not None else None
                 game = games_today.get(pid) if day == today and opponent is not None else None
                 rest = projection(pid, day) if opponent is not None else _zeros()
+                p_play = players[pid].p_play if pid in players else 0.0
                 if game is not None and game.state != "pre":
                     # Tipped: his line so far, plus the rest of the game (gone once it's final).
                     so_far = dict(live[pid].stats) if pid in live else _zeros()
                     stats, projected, actual = so_far, _sum(so_far, rest), True
+                    start = 1.0 if pid in live else 0.0 if game.state == "final" else p_play
                 else:
-                    stats, projected, actual = rest, rest, False
+                    stats, projected, actual, start = rest, rest, False, p_play
+                counts = opponent is not None and _starts(slot)
                 cell = DayCell(
                     day,
                     slot,
                     opponent,
-                    counts=opponent is not None and _starts(slot),
+                    counts=counts,
                     actual=actual,
                     stats=stats,
                     projected=projected,
                     game=game,
+                    start=start if counts else 0.0,
                 )
             if cell.counts:
                 _add(totals, cell.projected)
@@ -158,8 +164,8 @@ def team_week(
         counted = [row.cells[i] for row in rows if row.cells[i].counts]
         day_actual.append(_sum(*(c.stats for c in counted if c.actual)))
         day_projected.append(_sum(*(c.projected for c in counted)))
+        starts.append(sum(c.start for c in counted))
         if day < today:
-            starts.append(float(len(counted)))
             missed.append(None)
             continue
         # Able to play: on the roster outside IR, with a game, and not ruled out.
@@ -173,7 +179,6 @@ def team_week(
         ]
         set_starters = [row.player_id for row in rows if row.player_id in able and row.cells[i].counts]
         best = assign_starters([(pid, players[pid].eligible_slots) for pid in able], slot_counts)
-        starts.append(sum(players[pid].p_play for pid in set_starters))
         missed.append(max(len(best) - len(set_starters), 0))
 
     return TeamWeek(days, rows, day_actual, day_projected, _sum(*day_projected), starts, missed)

@@ -66,3 +66,4 @@ def test_today_shows_the_line_so_far_and_projects_the_rest():
     assert c_cell.actual and c_cell.stats["PTS"] == c_cell.projected["PTS"] == 9
     assert a_cell.game.state == "live" and c_cell.game.state == "final"
     assert w.day_actual[1]["PTS"] == 24 and w.day_projected[1]["PTS"] == 24 + 5
+    assert w.starts[1] == 2  # both have played, so neither is a maybe

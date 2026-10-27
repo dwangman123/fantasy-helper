@@ -67,8 +67,8 @@ def parse_stat_lines(p: Any, season: int) -> list[StatLine]:
 def parse_team(t: Any) -> Team:
     return Team(
         team_id=int(t.team_id),
-        name=t.team_name,
-        abbrev=t.team_abbrev,
+        name=t.team_name.strip(),
+        abbrev=t.team_abbrev.strip(),  # ESPN pads some abbreviations with spaces
         wins=int(t.wins),
         losses=int(t.losses),
         ties=int(getattr(t, "ties", 0) or 0),

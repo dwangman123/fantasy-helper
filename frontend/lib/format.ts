@@ -1,3 +1,5 @@
+import type { Stats } from "@/lib/api";
+
 export const pct = (p: number) => `${Math.round(p * 100)}%`;
 
 // A change in probability, in percentage points: "+4.1 pts".
@@ -24,3 +26,24 @@ export const weekday = (iso: string) =>
 
 export const dateTime = (iso: string) =>
   new Date(iso).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" });
+
+export const timeOfDay = (iso: string) => new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+
+// Percentage categories come from their makes and attempts.
+export const PARTS: Record<string, [string, string]> = { "FG%": ["FGM", "FGA"], "FT%": ["FTM", "FTA"] };
+
+// Box scores are whole numbers; projections and averages keep a decimal.
+export const num = (x: number, exact: boolean) => (exact ? Math.round(x).toString() : x.toFixed(1));
+
+// One game's line in a category: makes/attempts for FG% and FT%.
+export function lineValue(stats: Stats, key: string, exact: boolean): string {
+  const parts = PARTS[key];
+  return parts ? `${num(stats[parts[0]], exact)}/${num(stats[parts[1]], exact)}` : num(stats[key], exact);
+}
+
+// A total in a category: a percentage from the summed makes and attempts.
+export function totalValue(stats: Stats, key: string, exact: boolean): string {
+  const parts = PARTS[key];
+  if (!parts) return num(stats[key], exact);
+  return stats[parts[1]] ? stat(stats[parts[0]] / stats[parts[1]], true) : "–";
+}

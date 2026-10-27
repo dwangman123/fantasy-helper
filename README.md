@@ -25,16 +25,17 @@ appended to `matchup_predictions`; `fh-predict` prints them on demand.
 lowest-value players and ranks by the change in win odds; *hold* ranks by the change in
 expected categories won per week against a league-average team over the rest of the
 season. A category board labels each category locked / swing / lost. A FastAPI service
-serves matchups and waivers, and a Next.js app has Matchup and Waivers pages. The Matchup
-page also breaks the week down by player and day, following the lineup set on ESPN (box
-scores for days played, projections after), and a Refresh button runs the ingest
-(`POST /api/refresh`).
+serves matchups and waivers, and a Next.js app has Matchup and Waivers pages. A Refresh
+button runs the ingest (`POST /api/refresh`).
 Still open: what the league's add limit means and when a pickup can first play (the
 rankings assume the next day; see PROJECT_PLAN.md).
 
-**Week 3c (live scoring): in progress.** A Refresh during games is live: totals so far
-include today's lines, games that have tipped are locked into their set slots, and only the
-rest of each live game is projected (see *Live scoring* below).
+**Week 3c (live scoring, head-to-head Matchup page): in progress.** A Refresh during games
+is live: totals so far include today's lines, games that have tipped are locked into their
+set slots, and only the rest of each live game is projected (see *Live scoring* below). The
+Matchup page is picked by matchup rather than team and shows both teams head to head: each
+category's totals now and projected on either side of its win / tie / loss bar, and the lineup
+one day at a time (box scores, today's live lines with the game clock, projections ahead).
 
 ## Backend quickstart
 
