@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from fantasy_helper.analytics.actuals import category_values
 from fantasy_helper.analytics.matchup import MatchupPrediction, simulate_matchup
 from fantasy_helper.config import get_settings
 from fantasy_helper.context import LeagueContext, load_context
@@ -32,6 +33,7 @@ class WeekPredictions:
     days_left: list[int]  # scoring periods still to play
     week_days: list[int]
     results: list[tuple[Matchup, MatchupPrediction]]
+    actuals: dict[int, dict[str, float]]  # fantasy team -> started totals so far, today included
 
 
 def predict_matchup(ctx: LeagueContext, mu: Matchup, n_sims: int = N_SIMS, seed: int = 0) -> MatchupPrediction:
@@ -40,7 +42,7 @@ def predict_matchup(ctx: LeagueContext, mu: Matchup, n_sims: int = N_SIMS, seed:
     days = ctx.days_left
     return simulate_matchup(
         ctx.categories,
-        {"home": mu.home_cats, "away": mu.away_cats},
+        {"home": ctx.actual(mu.home_team_id), "away": ctx.actual(mu.away_team_id)},
         {"home": ctx.team_sim_players(mu.home_team_id, days), "away": ctx.team_sim_players(mu.away_team_id, days)},
         days,
         ctx.slot_counts,
@@ -59,7 +61,9 @@ def predict_current_week(
         for mu in q.load_matchups(session, season, ctx.matchup_period)
         if mu.away_team_id is not None  # playoff bye
     ]
-    return WeekPredictions(season, ctx.matchup_period, ctx.days_left, list(ctx.week.scoring_periods), results)
+    return WeekPredictions(
+        season, ctx.matchup_period, ctx.days_left, list(ctx.week.scoring_periods), results, ctx.actuals
+    )
 
 
 def store_predictions(
@@ -109,6 +113,10 @@ def _format(week: WeekPredictions, teams: dict, categories: list, focus_team: in
         home, away = teams[mu.home_team_id], teams[mu.away_team_id]
         ha, aa = home.abbrev.strip(), away.abbrev.strip()
         hw, aw, t = p.most_likely_score
+        now = {
+            side: category_values(week.actuals.get(team_id, {}), categories)
+            for side, team_id in (("home", mu.home_team_id), ("away", mu.away_team_id))
+        }
         lines += [
             "",
             f"{home.name} ({ha}) vs {away.name} ({aa})",
@@ -121,7 +129,7 @@ def _format(week: WeekPredictions, teams: dict, categories: list, focus_team: in
         ]
         for cat in categories:
             fmt = "{:9.3f}" if cat.is_percentage else "{:9.0f}"
-            now_h, now_a = mu.home_cats.get(cat.key), mu.away_cats.get(cat.key)
+            now_h, now_a = now["home"][cat.key], now["away"][cat.key]
             cp = p.cat_probs[cat.key]
             lines.append(
                 f"  {cat.key:<5}"

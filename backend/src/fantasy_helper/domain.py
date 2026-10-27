@@ -104,6 +104,18 @@ class DailySlot:
 
 
 @dataclass
+class LiveGame:
+    """An NBA team's game today, as it stood when fetched."""
+
+    pro_team: str  # fantasy schedule code, e.g. "GSW"
+    tip_at: datetime | None  # UTC
+    state: str  # "pre", "live" or "final"
+    period: int  # 0 before tip; 5+ is overtime
+    clock: str  # game clock in the period, e.g. "5:21"
+    remaining: float  # share of the game still to play: 1 before tip, 0 at the final
+
+
+@dataclass
 class OpponentStats:
     """What opponents average against one NBA team: its per-game stats allowed."""
 
@@ -130,8 +142,9 @@ class LeagueSnapshot:
     fetched_at: datetime
     lineup_slot_counts: dict[str, int] = field(default_factory=dict)  # slot name -> count, incl. BE/IR
     scoring_type: str | None = None  # e.g. H2H_MOST_CATEGORIES
-    first_tip_at: datetime | None = None  # earliest game today (current scoring period), UTC
     game_stats: list[PlayerGameStat] = field(default_factory=list)  # completed days fetched this run
     opponent_stats: list[OpponentStats] = field(default_factory=list)  # empty if that fetch failed
     daily_lineups: list[DailySlot] = field(default_factory=list)  # set lineups, today through the week's end
+    live_stats: list[PlayerGameStat] = field(default_factory=list)  # rostered players' lines today so far
+    live_games: list[LiveGame] = field(default_factory=list)  # today's NBA games
     warnings: list[str] = field(default_factory=list)  # non-fatal fetch problems

@@ -6,7 +6,16 @@ from sqlalchemy.orm import Session
 from fantasy_helper.categories import KNOWN_CATEGORIES
 from fantasy_helper.context import p_play
 from fantasy_helper.db import models as m
-from fantasy_helper.domain import LeagueSnapshot, Matchup, Player, ProGame, RosterEntry, StatLine, Team
+from fantasy_helper.domain import (
+    LeagueSnapshot,
+    Matchup,
+    Player,
+    PlayerGameStat,
+    ProGame,
+    RosterEntry,
+    StatLine,
+    Team,
+)
 from fantasy_helper.ingest.store import store_snapshot
 from fantasy_helper.predict import predict_current_week, store_predictions
 
@@ -15,6 +24,7 @@ SLOTS = {"PG": 1, "SG": 1, "SF": 1, "PF": 1, "C": 1, "G": 1, "F": 1, "UT": 3, "B
 
 def snapshot():
     per_game = {k: 2.0 for k in m.STAT_COLUMNS}
+    box = dict.fromkeys(m.STAT_COLUMNS, 0.0)
     return LeagueSnapshot(
         league_id=1,
         season=2027,
@@ -29,6 +39,8 @@ def snapshot():
         pro_games=[ProGame("BOS", sp, "DET", date(2026, 10, 19 + sp)) for sp in (2, 4, 5)]
         + [ProGame("LAL", 4, "GSW", date(2026, 10, 23))],
         matchups=[Matchup(1, 1, 4, 7, "UNDECIDED", "NONE", {"PTS": 10.0}, {"PTS": 30.0})],
+        # Totals so far come from started box scores: B's 30 points on day 2, while he was healthy.
+        game_stats=[PlayerGameStat(11, 2, "LAL", 30.0, box | {"PTS": 30.0}, team_id=7, lineup_slot="C")],
         matchup_ids={},
         fetched_at=datetime.now(UTC),
         lineup_slot_counts=SLOTS,

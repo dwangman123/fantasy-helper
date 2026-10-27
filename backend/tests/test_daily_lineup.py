@@ -1,6 +1,6 @@
 from fantasy_helper.analytics.daily_lineup import team_week
 from fantasy_helper.analytics.matchup import SimPlayer
-from fantasy_helper.domain import STAT_KEYS, PlayerGameStat
+from fantasy_helper.domain import STAT_KEYS, LiveGame, PlayerGameStat
 
 SLOTS = {"PG": 1, "UT": 1, "BE": 2, "IR": 1}
 
@@ -28,7 +28,8 @@ def week():
 
 def test_only_started_games_count():
     w = week()
-    assert [t["PTS"] for t in w.day_totals] == [25, 20, 20 * 1.1 + 8]
+    assert [t["PTS"] for t in w.day_projected] == [25, 20, 20 * 1.1 + 8]
+    assert [t["PTS"] for t in w.day_actual] == [25, 0, 0]
     assert w.totals["PTS"] == 25 + 20 + 22 + 8
     by_id = {p.player_id: p for p in w.players}
     benched = by_id[2].cells[1]
@@ -45,3 +46,23 @@ def test_flags_games_left_on_the_bench():
 
 def test_players_listed_in_lineup_order():
     assert [p.player_id for p in week().players] == [1, 3, 2, 4]
+
+
+def test_today_shows_the_line_so_far_and_projects_the_rest():
+    """Day 2 is today. A's game is live with a quarter left; C's game is over."""
+    a = SimPlayer(1, ["PG", "UT"], rates(20), games={2: dict.fromkeys(STAT_KEYS, 0.25)}, priority=3)
+    c = SimPlayer(3, ["UT"], rates(8), games={}, priority=1)  # final: no game left to project
+    slots = {(1, 2): "PG", (3, 2): "UT"}
+    live = {
+        1: PlayerGameStat(1, 2, "BOS", 30, rates(15), 4, "PG"),
+        3: PlayerGameStat(3, 2, "DEN", 25, rates(9), 4, "UT"),
+    }
+    games = {1: LiveGame("BOS", None, "live", 4, "6:00", 0.25), 3: LiveGame("DEN", None, "final", 4, "0.0", 0.0)}
+    opponents = {1: {2: "LAL"}, 3: {2: "MIA"}}
+    w = team_week([1, 2], 2, SLOTS, slots, [], {1: a, 3: c}, opponents, live, games)
+    by_id = {p.player_id: p for p in w.players}
+    a_cell, c_cell = by_id[1].cells[1], by_id[3].cells[1]
+    assert a_cell.actual and a_cell.stats["PTS"] == 15 and a_cell.projected["PTS"] == 15 + 20 * 0.25
+    assert c_cell.actual and c_cell.stats["PTS"] == c_cell.projected["PTS"] == 9
+    assert a_cell.game.state == "live" and c_cell.game.state == "final"
+    assert w.day_actual[1]["PTS"] == 24 and w.day_projected[1]["PTS"] == 24 + 5

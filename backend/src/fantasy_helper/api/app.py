@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from fantasy_helper.analytics.actuals import category_values
 from fantasy_helper.analytics.daily_lineup import team_week
 from fantasy_helper.analytics.waivers import category_board, side_view
 from fantasy_helper.api import schemas as s
@@ -26,7 +27,7 @@ from fantasy_helper.context import LeagueContext, load_context
 from fantasy_helper.db import models as m
 from fantasy_helper.db import queries as q
 from fantasy_helper.db.session import get_sessionmaker
-from fantasy_helper.domain import Player
+from fantasy_helper.domain import LiveGame, Player
 from fantasy_helper.ingest.run import run as run_ingest
 from fantasy_helper.predict import WeekPredictions, predict_current_week
 from fantasy_helper.waivers import WaiverReport, waiver_report
@@ -160,7 +161,10 @@ def matchup(c: CtxDep, team_id: int | None = None):
     side, other = ("home", "away") if mu.home_team_id == team_id else ("away", "home")
     view = side_view(pred, side)
     board = category_board(view.cat_p_win)
-    now = {"home": mu.home_cats, "away": mu.away_cats}
+    now = {
+        "home": category_values(ctx.actual(mu.home_team_id), ctx.categories),
+        "away": category_values(ctx.actual(mu.away_team_id), ctx.categories),
+    }
     rows = c.session.scalars(
         select(m.MatchupPrediction)
         .where(m.MatchupPrediction.season == c.season, m.MatchupPrediction.espn_id == mu.espn_id)
@@ -254,6 +258,12 @@ def lineup(c: CtxDep, team_id: int | None = None):
         [g for g in played if g.player_id in players],
         {pid: ctx.sim_player(pid, ctx.days_left) for pid in ids if pid in ctx.rates and pid in ctx.players},
         {pid: schedule.get(players[pid].pro_team, {}) for pid in ids if pid in players},
+        live={pid: g for pid, g in ctx.live_stats.items() if pid in ids},
+        games_today={
+            pid: ctx.live_games[players[pid].pro_team]
+            for pid in ids
+            if pid in players and players[pid].pro_team in ctx.live_games
+        },
     )
     return s.TeamLineup(
         team_id=team_id,
@@ -262,7 +272,8 @@ def lineup(c: CtxDep, team_id: int | None = None):
             s.LineupDay(
                 day=ctx.calendar.date_for(day),
                 played=day < ctx.scoring_period,
-                totals=week.day_totals[i],
+                actual=week.day_actual[i],
+                projected=week.day_projected[i],
                 starts=week.starts[i],
                 missed_starts=week.missed_starts[i],
             )
@@ -272,7 +283,15 @@ def lineup(c: CtxDep, team_id: int | None = None):
             s.LineupPlayer(
                 player=_player(ctx, row.player_id, players),
                 cells=[
-                    s.LineupCell(slot=x.slot, opponent=x.opponent, counts=x.counts, actual=x.actual, stats=x.stats)
+                    s.LineupCell(
+                        slot=x.slot,
+                        opponent=x.opponent,
+                        counts=x.counts,
+                        actual=x.actual,
+                        stats=x.stats,
+                        projected=x.projected,
+                        game=_game(x.game),
+                    )
                     for x in row.cells
                 ],
                 totals=row.totals,
@@ -281,6 +300,21 @@ def lineup(c: CtxDep, team_id: int | None = None):
         ],
         totals=week.totals,
     )
+
+
+def _game(g: LiveGame | None) -> s.GameOut | None:
+    if g is None:
+        return None
+    if g.state == "final":
+        status = "Final"
+    elif g.state == "live" and g.period > 4:
+        overtime = g.period - 4
+        status = f"{'' if overtime == 1 else overtime}OT {g.clock}"
+    elif g.state == "live":
+        status = f"Q{g.period} {g.clock}" if g.period else "Live"
+    else:
+        status = ""
+    return s.GameOut(state=g.state, status=status, tip_at=g.tip_at)
 
 
 @router.post("/refresh", response_model=s.IngestOut)

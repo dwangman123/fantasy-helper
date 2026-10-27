@@ -142,6 +142,46 @@ class PlayerGameStat(Base):
     fta: Mapped[float] = mapped_column(Float)
 
 
+class LiveGameStat(Base):
+    """Rostered players' box scores so far today. Replaced with the snapshot: once the day
+    is over, its final lines are fetched into player_game_stats instead."""
+
+    __tablename__ = "live_game_stats"
+
+    season: Mapped[int] = mapped_column(Integer, primary_key=True)
+    player_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    scoring_period: Mapped[int] = mapped_column(Integer)
+    pro_team: Mapped[str | None] = mapped_column(String(10))
+    team_id: Mapped[int | None] = mapped_column(Integer)
+    lineup_slot: Mapped[str | None] = mapped_column(String(10))
+    minutes: Mapped[float] = mapped_column(Float)
+    pts: Mapped[float] = mapped_column(Float)
+    reb: Mapped[float] = mapped_column(Float)
+    ast: Mapped[float] = mapped_column(Float)
+    stl: Mapped[float] = mapped_column(Float)
+    blk: Mapped[float] = mapped_column(Float)
+    tpm: Mapped[float] = mapped_column(Float)
+    tov: Mapped[float] = mapped_column(Float)
+    fgm: Mapped[float] = mapped_column(Float)
+    fga: Mapped[float] = mapped_column(Float)
+    ftm: Mapped[float] = mapped_column(Float)
+    fta: Mapped[float] = mapped_column(Float)
+
+
+class LiveGame(Base):
+    """Each NBA team's game today as it stood at the ingest. Replaced with the snapshot."""
+
+    __tablename__ = "live_games"
+
+    season: Mapped[int] = mapped_column(Integer, primary_key=True)
+    pro_team: Mapped[str] = mapped_column(String(10), primary_key=True)
+    tip_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    state: Mapped[str] = mapped_column(String(10))  # pre / live / final
+    period: Mapped[int] = mapped_column(Integer)
+    clock: Mapped[str] = mapped_column(String(10))
+    remaining: Mapped[float] = mapped_column(Float)  # share of the game still to play
+
+
 class OpponentStat(Base):
     """Per-game stats each NBA team allows. Replaced on ingests where the fetch succeeds."""
 

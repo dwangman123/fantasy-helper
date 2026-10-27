@@ -3,7 +3,7 @@
 No network access here, so everything is unit-testable with fakes.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from espn_api.basketball.constant import POSITION_MAP, PRO_TEAM_MAP, STATS_MAP
@@ -14,6 +14,7 @@ from fantasy_helper.domain import (
     STAT_KEYS,
     STAT_WINDOWS,
     DailySlot,
+    LiveGame,
     Matchup,
     OpponentStats,
     Player,
@@ -123,13 +124,70 @@ def parse_lineup_slot_counts(roster_settings: dict) -> dict[str, int]:
     }
 
 
-def first_tip(players: list[Any], scoring_period: int) -> datetime | None:
-    """Earliest game start on a scoring period, from player schedules (as UTC).
+def tips(players: list[Any], scoring_period: int) -> dict[str, datetime]:
+    """NBA team -> its game's start on a scoring period, from player schedules (as UTC).
 
     espn_api gives naive datetimes in the machine's local timezone.
     """
-    tips = [g["date"] for p in players for sp, g in p.schedule.items() if int(sp) == scoring_period and g.get("date")]
-    return min(tips).astimezone(UTC) if tips else None
+    return {
+        p.proTeam: g["date"].astimezone(UTC)
+        for p in players
+        for sp, g in p.schedule.items()
+        if int(sp) == scoring_period and g.get("date") and p.proTeam not in (None, "", "FA")
+    }
+
+
+_REGULATION_MINUTES, _QUARTER_MINUTES = 48.0, 12.0
+_SCOREBOARD_STATES = {"pre": "pre", "in": "live", "post": "final"}
+
+
+def _remaining(period: int, clock_seconds: float) -> float:
+    """Share of regulation still to play; overtime counts as nothing left."""
+    if period > 4:
+        return 0.0
+    elapsed = (period - 1) * _QUARTER_MINUTES + _QUARTER_MINUTES - clock_seconds / 60
+    return min(max(1 - elapsed / _REGULATION_MINUTES, 0.0), 1.0)
+
+
+def parse_live_games(scoreboard: dict) -> list[LiveGame]:
+    """One LiveGame per team from ESPN's public NBA scoreboard (site API). Its team ids
+    are the fantasy API's proTeamIds. A postponed game ends as "post" with nothing played,
+    so it counts as final with nothing left."""
+    out = []
+    for event in scoreboard.get("events") or []:
+        status = event.get("status") or {}
+        state = _SCOREBOARD_STATES.get((status.get("type") or {}).get("state"), "pre")
+        period = int(status.get("period") or 0)
+        remaining = {"pre": 1.0, "final": 0.0}.get(state)
+        if remaining is None:
+            remaining = _remaining(max(period, 1), float(status.get("clock") or 0))
+        tip = datetime.fromisoformat(event["date"]).astimezone(UTC) if event.get("date") else None
+        for side in (event.get("competitions") or [{}])[0].get("competitors") or []:
+            team = side.get("team") or {}
+            abbrev = PRO_TEAM_MAP.get(int(team.get("id") or 0)) or SITE_TO_FANTASY_TEAM.get(
+                team.get("abbreviation"), team.get("abbreviation")
+            )
+            out.append(LiveGame(abbrev, tip, state, period, status.get("displayClock") or "", remaining))
+    return out
+
+
+# A game's length, for estimating its state from the tip time when the scoreboard is unavailable.
+GAME_LENGTH = timedelta(hours=2, minutes=30)
+
+
+def estimate_live_games(tips_by_team: dict[str, datetime], now: datetime) -> list[LiveGame]:
+    """Fallback states: live for GAME_LENGTH after the tip, the share left falling linearly."""
+    out = []
+    for team, tip in tips_by_team.items():
+        played = (now - tip) / GAME_LENGTH
+        if played <= 0:
+            state, remaining = "pre", 1.0
+        elif played >= 1:
+            state, remaining = "final", 0.0
+        else:
+            state, remaining = "live", 1 - played
+        out.append(LiveGame(team, tip, state, 0, "", remaining))
+    return out
 
 
 def _cats_from_score(side: dict, categories: list[Category]) -> dict[str, float]:
@@ -189,6 +247,17 @@ def parse_game_stat(
             lineup_slot=POSITION_MAP.get(lineup_slot_id) if lineup_slot_id is not None else None,
         )
     return None
+
+
+def parse_day_stats(teams: list[dict], scoring_period: int) -> list[PlayerGameStat]:
+    """Rostered players' box scores for one day from the raw mRoster `teams` array, with
+    each player's fantasy team and slot. On the current day these are the lines so far."""
+    return [
+        g
+        for t in teams
+        for e in t["roster"]["entries"]
+        if (g := parse_game_stat(e["playerPoolEntry"]["player"], scoring_period, int(t["id"]), e.get("lineupSlotId")))
+    ]
 
 
 # ESPN's public site API abbreviates 8 teams differently from the fantasy API.

@@ -125,7 +125,7 @@ function LineupTable({ data, statKey, fetching }: TableProps) {
             <td className="sticky">Team total</td>
             {data.days.map((d) => (
               <td key={d.day} className="num">
-                {totalValue(d.totals, statKey, d.played)}
+                {totalValue(d.projected, statKey, d.played)}
               </td>
             ))}
             <td className="num">

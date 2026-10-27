@@ -7,6 +7,10 @@ of playing from ESPN's injury status, and a start priority from blended z-scores
 (baseline: rostered players). Players in the IR slot are left out of a team.
 Game-to-game spread comes from the box-score history (`variance.fit_dispersion`),
 falling back to Poisson until there are enough logged games.
+
+Today is live: each team's totals so far include today's lines (`actuals`), and a
+game that has tipped is locked into the player's set slot with only the part
+still to play projected; a free agent can't join a game already under way.
 """
 
 from collections.abc import Iterable
@@ -14,6 +18,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
+from fantasy_helper.analytics.actuals import week_actuals
 from fantasy_helper.analytics.matchup import SimPlayer
 from fantasy_helper.analytics.opponent import opponent_factors
 from fantasy_helper.analytics.rates import blend_rates
@@ -23,7 +28,7 @@ from fantasy_helper.calendar import MatchupCalendar, MatchupWeek, load_calendar
 from fantasy_helper.categories import Category
 from fantasy_helper.db import models as m
 from fantasy_helper.db import queries as q
-from fantasy_helper.domain import STAT_KEYS, Player, RosterEntry
+from fantasy_helper.domain import STAT_KEYS, LiveGame, Player, PlayerGameStat, RosterEntry
 
 OUT_STATUSES = {"OUT", "SUSPENSION", "INJURY_RESERVE"}
 DAY_TO_DAY_P_PLAY = 0.5
@@ -53,6 +58,10 @@ class LeagueContext:
     factors: dict[str, dict[str, float]]  # NBA team -> per-stat multiplier for its opponents
     dispersion: dict[str, float]
     schedule: dict[str, dict[int, str]]  # NBA team -> {scoring period: opponent}, today on
+    actuals: dict[int, dict[str, float]]  # fantasy team -> started totals this week so far, today included
+    live_games: dict[str, LiveGame]  # NBA team -> its game today
+    live_stats: dict[int, PlayerGameStat]  # player -> his line so far today
+    today_slots: dict[int, str]  # player -> set lineup slot today
 
     @property
     def matchup_period(self) -> int:
@@ -61,6 +70,9 @@ class LeagueContext:
     @property
     def days_left(self) -> list[int]:
         return [sp for sp in self.week.scoring_periods if sp >= self.scoring_period]
+
+    def actual(self, team_id: int) -> dict[str, float]:
+        return self.actuals.get(team_id) or dict.fromkeys(STAT_KEYS, 0.0)
 
     def team_entries(self, team_id: int) -> list[RosterEntry]:
         """Roster entries that hold a roster spot (IR doesn't)."""
@@ -73,7 +85,7 @@ class LeagueContext:
     def sim_player(self, player_id: int, days: Iterable[int], healthy: bool = False) -> SimPlayer:
         p = self.players[player_id]
         games = self.schedule.get(p.pro_team, {})
-        return SimPlayer(
+        sim = SimPlayer(
             player_id=player_id,
             eligible_slots=p.eligible_slots,
             per_game=self.rates[player_id],
@@ -81,6 +93,23 @@ class LeagueContext:
             p_play=1.0 if healthy else p_play(p.injury_status),
             priority=self.z[player_id].total,
         )
+        today, live = self.scoring_period, self.live_games.get(p.pro_team)
+        if today not in sim.games or live is None or live.state == "pre":
+            return sim
+        slot = self.today_slots.get(player_id)
+        if slot is None:  # not rostered: too late to add him for this game
+            del sim.games[today]
+            return sim
+        # Locked into his slot; what he has so far is in `actuals`, so only the rest is projected.
+        sim.locked[today] = slot
+        if live.remaining > 0:
+            factors = sim.games[today]
+            sim.games[today] = {k: factors.get(k, 1.0) * live.remaining for k in STAT_KEYS}
+        else:
+            del sim.games[today]
+        if player_id in self.live_stats:
+            sim.p_play = 1.0  # he's played today
+        return sim
 
     def team_sim_players(self, team_id: int, days: Iterable[int], healthy: bool = False) -> list[SimPlayer]:
         days = list(days)
@@ -99,18 +128,26 @@ def load_context(session: Session, season: int) -> LeagueContext:
     lines = blend_rates(q.load_stat_lines(session, season, "season"), q.load_stat_lines(session, season, "projected"))
     categories = q.load_categories(session, season)
     last_day = calendar.weeks[-1].last_scoring_period
+    week, today = calendar.week(league.current_matchup_period), league.current_scoring_period
+    game_stats = q.load_game_stats(session, season)
+    live_stats = q.load_live_stats(session, season)
+    completed = [g for g in game_stats if g.scoring_period in week.scoring_periods and g.scoring_period < today]
     return LeagueContext(
         season=season,
         categories=categories,
         calendar=calendar,
-        week=calendar.week(league.current_matchup_period),
-        scoring_period=league.current_scoring_period,
+        week=week,
+        scoring_period=today,
         slot_counts=league.lineup_slot_counts,
         rosters=rosters,
         players=q.load_players(session, rostered_ids | {s.player_id for s in lines}),
         rates={s.player_id: s.per_game for s in lines},
         z=player_zscores(lines, categories, baseline_ids=rostered_ids),
         factors=opponent_factors(q.load_opponent_stats(session, season)),
-        dispersion=fit_dispersion(q.load_game_stats(session, season), STAT_KEYS),
-        schedule=q.load_schedule(session, season, range(league.current_scoring_period, last_day + 1)),
+        dispersion=fit_dispersion(game_stats, STAT_KEYS),
+        schedule=q.load_schedule(session, season, range(today, last_day + 1)),
+        actuals=week_actuals([*completed, *live_stats]),
+        live_games=q.load_live_games(session, season),
+        live_stats={g.player_id: g for g in live_stats},
+        today_slots=q.load_day_slots(session, season, today),
     )

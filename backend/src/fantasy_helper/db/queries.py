@@ -9,6 +9,7 @@ from fantasy_helper.categories import KNOWN_CATEGORIES, Category
 from fantasy_helper.db import models as m
 from fantasy_helper.domain import (
     DailySlot,
+    LiveGame,
     Matchup,
     OpponentStats,
     Player,
@@ -125,16 +126,37 @@ def load_game_stats(
         query = query.where(m.PlayerGameStat.team_id == team_id)
     if scoring_periods is not None:
         query = query.where(m.PlayerGameStat.scoring_period.in_(list(scoring_periods)))
-    rows = session.scalars(query)
-    return [
-        PlayerGameStat(
-            player_id=r.player_id,
-            scoring_period=r.scoring_period,
-            pro_team=r.pro_team,
-            minutes=r.minutes,
-            stats={key: getattr(r, col) for col, key in _STAT_KEYS_BY_COLUMN.items()},
-            team_id=r.team_id,
-            lineup_slot=r.lineup_slot,
+    return [_game_stat(r) for r in session.scalars(query)]
+
+
+def load_live_stats(session: Session, season: int) -> list[PlayerGameStat]:
+    """Rostered players' box scores so far today."""
+    return [_game_stat(r) for r in session.scalars(select(m.LiveGameStat).where(m.LiveGameStat.season == season))]
+
+
+def load_live_games(session: Session, season: int) -> dict[str, LiveGame]:
+    """NBA team -> its game today."""
+    rows = session.scalars(select(m.LiveGame).where(m.LiveGame.season == season))
+    return {r.pro_team: LiveGame(r.pro_team, r.tip_at, r.state, r.period, r.clock, r.remaining) for r in rows}
+
+
+def load_day_slots(session: Session, season: int, scoring_period: int) -> dict[int, str]:
+    """Player -> set lineup slot on one day, across every team."""
+    rows = session.execute(
+        select(m.DailyLineup.player_id, m.DailyLineup.lineup_slot).where(
+            m.DailyLineup.season == season, m.DailyLineup.scoring_period == scoring_period
         )
-        for r in rows
-    ]
+    )
+    return {pid: slot for pid, slot in rows}
+
+
+def _game_stat(r: m.PlayerGameStat | m.LiveGameStat) -> PlayerGameStat:
+    return PlayerGameStat(
+        player_id=r.player_id,
+        scoring_period=r.scoring_period,
+        pro_team=r.pro_team,
+        minutes=r.minutes,
+        stats={key: getattr(r, col) for col, key in _STAT_KEYS_BY_COLUMN.items()},
+        team_id=r.team_id,
+        lineup_slot=r.lineup_slot,
+    )

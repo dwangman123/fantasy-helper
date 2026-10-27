@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy.orm import sessionmaker
 
+from fantasy_helper.analytics.actuals import espn_mismatches
 from fantasy_helper.calendar import load_calendar
 from fantasy_helper.config import Settings, get_settings
 from fantasy_helper.db import models as m
@@ -31,19 +32,21 @@ def run(settings: Settings | None = None, session_factory: sessionmaker | None =
 
     try:
         snap = fetch_snapshot(settings, stored_game_days)
-        warnings = load_calendar(settings.season).validate_against_espn(snap.matchup_ids)
+        calendar = load_calendar(settings.season)
+        warnings = calendar.validate_against_espn(snap.matchup_ids)
         for w in warnings:
             log.warning("calendar mismatch: %s", w)
         for w in snap.warnings:
             log.warning(w)
         warnings += snap.warnings
-        if snap.first_tip_at and snap.fetched_at >= snap.first_tip_at:
-            # Not handled, by design: run before games start so live totals cover completed days only.
-            warnings.append(
-                f"Ran after today's first tip-off ({snap.first_tip_at.astimezone():%H:%M}); live matchup totals "
-                "may include today's games, which predictions also project"
-            )
-            log.warning(warnings[-1])
+        week_days = set(calendar.week(snap.current_matchup_period).scoring_periods)
+        for w in espn_mismatches(
+            [mu for mu in snap.matchups if mu.matchup_period == snap.current_matchup_period],
+            [g for g in snap.game_stats if g.scoring_period in week_days],
+            snap.live_stats,
+        ):
+            log.warning(w)
+            warnings.append(w)
         with Session.begin() as session:
             counts = store_snapshot(session, snap)
             run_row = session.get(m.IngestRun, run_id)

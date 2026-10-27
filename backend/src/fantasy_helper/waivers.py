@@ -86,7 +86,7 @@ def waiver_report(
     z = {pid: pz.by_cat for pid, pz in ctx.z.items()}
     stream = rank_stream(
         ctx.categories,
-        {"home": mu.home_cats, "away": mu.away_cats},
+        {"home": ctx.actual(mu.home_team_id), "away": ctx.actual(mu.away_team_id)},
         {"home": ctx.team_sim_players(mu.home_team_id, days), "away": ctx.team_sim_players(mu.away_team_id, days)},
         side,
         days,

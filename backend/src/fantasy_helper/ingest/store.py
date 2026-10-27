@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from fantasy_helper.db import models as m
 from fantasy_helper.domain import LeagueSnapshot
 
-_SEASON_TABLES = [m.RosterEntry, m.DailyLineup, m.StatLine, m.ProGame, m.Matchup, m.Team]
+_SEASON_TABLES = [m.RosterEntry, m.DailyLineup, m.StatLine, m.ProGame, m.Matchup, m.Team, m.LiveGameStat, m.LiveGame]
 
 
 def store_snapshot(session: Session, snap: LeagueSnapshot) -> dict[str, int]:
@@ -103,6 +103,31 @@ def store_snapshot(session: Session, snap: LeagueSnapshot) -> dict[str, int]:
         )
         for x in snap.matchups
     )
+    session.add_all(
+        m.LiveGameStat(
+            season=season,
+            player_id=g.player_id,
+            scoring_period=g.scoring_period,
+            pro_team=g.pro_team,
+            team_id=g.team_id,
+            lineup_slot=g.lineup_slot,
+            minutes=g.minutes,
+            **{col: g.stats[key] for key, col in m.STAT_COLUMNS.items()},
+        )
+        for g in snap.live_stats
+    )
+    session.add_all(
+        m.LiveGame(
+            season=season,
+            pro_team=g.pro_team,
+            tip_at=g.tip_at,
+            state=g.state,
+            period=g.period,
+            clock=g.clock,
+            remaining=g.remaining,
+        )
+        for g in {g.pro_team: g for g in snap.live_games}.values()  # one row per team, even if listed twice
+    )
     # Replace opponent stats only when this run fetched them, so a failed fetch keeps the last good set.
     if snap.opponent_stats:
         session.execute(delete(m.OpponentStat).where(m.OpponentStat.season == season))
@@ -139,4 +164,6 @@ def store_snapshot(session: Session, snap: LeagueSnapshot) -> dict[str, int]:
         "matchups": len(snap.matchups),
         "game_stats": len(snap.game_stats),
         "opponent_stats": len(snap.opponent_stats),
+        "live_stats": len(snap.live_stats),
+        "live_games": len(snap.live_games),
     }

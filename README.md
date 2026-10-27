@@ -32,6 +32,10 @@ scores for days played, projections after), and a Refresh button runs the ingest
 Still open: what the league's add limit means and when a pickup can first play (the
 rankings assume the next day; see PROJECT_PLAN.md).
 
+**Week 3c (live scoring): in progress.** A Refresh during games is live: totals so far
+include today's lines, games that have tipped are locked into their set slots, and only the
+rest of each live game is projected (see *Live scoring* below).
+
 ## Backend quickstart
 
 Requires [uv](https://docs.astral.sh/uv/). Python 3.12 is installed by uv automatically.
@@ -40,7 +44,7 @@ Requires [uv](https://docs.astral.sh/uv/). Python 3.12 is installed by uv automa
 cd backend
 uv sync
 uv run alembic upgrade head   # create tables (SQLite at backend/fantasy.db by default)
-uv run fh-ingest              # pull the league from ESPN (run daily, before the first tip-off)
+uv run fh-ingest              # pull the league from ESPN (any time; live during games)
 uv run fh-predict             # this week's matchup odds; --team ID for detail (default: mine)
 uv run fh-waivers             # stream and hold rankings; --today if pickups can play today
 uv run fh-api                 # REST API on http://127.0.0.1:8000 (docs at /docs)
@@ -99,15 +103,19 @@ frontend/            Next.js + TanStack Query: Matchup and Waivers pages
   it against the scoring periods ESPN has recorded; mismatches show up in `ingest_runs.warnings`.
 - **NBA schedule**: comes from ESPN player data. Teams show 80 games, not 82, until the NBA Cup
   fills in the last two; nightly ingests pick them up.
-- **Ingest timing**: run once a day before the first game. ESPN's live matchup totals include
-  games in progress, which the predictor would also project; a run after the first tip-off is
-  flagged in `ingest_runs.warnings` (and on that run's predictions) but not corrected.
+- **Live scoring**: an ingest (or Refresh) during games is live. ESPN's matchup totals only
+  count a day once it's processed, so "now" totals are summed from box scores instead: started
+  games (not BE/IR) on completed days plus today's lines so far (`live_game_stats`). Game states
+  come from ESPN's public NBA scoreboard (`live_games`; estimated from tip times if it's down). A
+  game that has tipped is locked into the player's set slot and only the rest of it is projected;
+  a free agent can't be added to a game already under way. Each ingest re-fetches the week's
+  completed days for stat corrections and warns if ESPN's totals disagree with the box scores.
 - **Set lineups**: ESPN keeps a lineup for every future day, not just today. Each ingest stores
   every team's slots from today through the end of the week (`daily_lineups`); past days' slots
   come from the box scores. Win odds still assume the best lineup each day, so the by-day view's
   totals can differ from the odds' projected finals.
 - **History tables** are never wiped: `player_game_stats` (daily box scores; missing days are
-  backfilled and the latest day is re-fetched for stat corrections) and `matchup_predictions`
+  backfilled, and the current week's days are re-fetched for stat corrections) and `matchup_predictions`
   (one row per matchup per run, for tracking odds through the week and for backtests).
 - **Opponent stats** come from ESPN's public, undocumented site API and may break without notice;
   a failed fetch keeps the last stored set and is logged as a warning.

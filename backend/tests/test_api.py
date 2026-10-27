@@ -6,6 +6,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from fantasy_helper.analytics.actuals import week_actuals
 from fantasy_helper.api.app import SnapshotCache, create_app
 from fantasy_helper.config import Settings
 from fantasy_helper.db import models as m
@@ -49,6 +50,16 @@ def test_matchup_is_from_my_side_with_history(client):
     assert other["p_win"] == body["p_loss"] and other["opponent_id"] == MY_TEAM
 
 
+def test_matchup_now_is_started_box_scores_plus_todays_lines(client):
+    snap = league_snapshot()
+    totals = week_actuals([*snap.game_stats, *snap.live_stats])[MY_TEAM]
+    completed = week_actuals(snap.game_stats)[MY_TEAM]
+    cats = {c["key"]: c for c in client.get("/api/matchup").json()["categories"]}
+    assert cats["PTS"]["now_me"] == totals["PTS"] > completed["PTS"]  # today's lines so far are in
+    assert cats["FG%"]["now_me"] == pytest.approx(totals["FGM"] / totals["FGA"])
+    assert cats["FT%"]["now_opp"] is not None
+
+
 def test_timestamps_are_sent_as_utc(client):
     # SQLite returns stored timestamps naive; the API must still send their UTC offset.
     created = client.get("/api/matchup").json()["history"][0]["created_at"]
@@ -73,9 +84,29 @@ def test_lineup_counts_started_games_only(client):
     for p in body["players"]:
         for cell in p["cells"]:
             assert not cell["counts"] or (cell["slot"] not in ("BE", "IR") and cell["opponent"])
-    pts = sum(d["totals"]["PTS"] for d in body["days"])
+    pts = sum(d["projected"]["PTS"] for d in body["days"])
     assert pts > 0 and abs(pts - body["totals"]["PTS"]) < 1e-6
     assert client.get("/api/lineup", params={"team_id": 99}).status_code == 404
+
+
+def test_lineup_shows_todays_games_live(client):
+    body = client.get("/api/lineup").json()
+    today = [d["played"] for d in body["days"]].index(False)
+    cells = [p["cells"][today] for p in body["players"] if p["cells"][today]["game"]]
+    states = {c["game"]["state"] for c in cells}
+    assert states <= {"pre", "live", "final"} and cells
+    for c in cells:
+        game = c["game"]
+        if game["state"] == "pre":
+            assert not c["actual"] and c["stats"] == c["projected"] and game["status"] == ""
+        else:
+            assert c["actual"] and game["status"] in ("Final", "Q3 6:00")
+            # Final: nothing left to add. Live: the rest of the game on top of the line so far.
+            grows = c["projected"]["PTS"] >= c["stats"]["PTS"]
+            assert c["projected"] == c["stats"] if game["state"] == "final" else grows
+    day = body["days"][today]
+    started_live = [c for c in cells if c["counts"] and c["actual"]]
+    assert abs(day["actual"]["PTS"] - sum(c["stats"]["PTS"] for c in started_live)) < 1e-6
 
 
 def test_unknown_team_is_404(client):

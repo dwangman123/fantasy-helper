@@ -77,12 +77,54 @@ def test_lineup_slot_counts_use_slot_names_and_drop_unused():
     assert counts == {"PG": 1, "SG": 1, "SF": 1, "PF": 1, "C": 1, "G": 1, "F": 1, "UT": 3, "BE": 3, "IR": 1}
 
 
-def test_first_tip_is_the_earliest_game_on_that_day():
-    early = fake_player(schedule={"4": {"team": "NYK", "date": datetime(2026, 10, 23, 16, 0)}})
-    late = fake_player(schedule={"4": {"team": "LAL", "date": datetime(2026, 10, 23, 19, 30)}})
-    other_day = fake_player(schedule={"5": {"team": "MIA", "date": datetime(2026, 10, 24, 9, 0)}})
-    assert parse.first_tip([late, early, other_day], 4) == datetime(2026, 10, 23, 16, 0).astimezone(UTC)
-    assert parse.first_tip([other_day], 4) is None
+def test_tips_are_each_teams_game_start_on_that_day():
+    early = fake_player(pro_team="NYK", schedule={"4": {"team": "BOS", "date": datetime(2026, 10, 23, 16, 0)}})
+    late = fake_player(pro_team="LAL", schedule={"4": {"team": "GSW", "date": datetime(2026, 10, 23, 19, 30)}})
+    other_day = fake_player(pro_team="MIA", schedule={"5": {"team": "ORL", "date": datetime(2026, 10, 24, 9, 0)}})
+    tips = parse.tips([late, early, other_day], 4)
+    assert tips == {
+        "NYK": datetime(2026, 10, 23, 16, 0).astimezone(UTC),
+        "LAL": datetime(2026, 10, 23, 19, 30).astimezone(UTC),
+    }
+
+
+def scoreboard_event(state, period=0, clock=0.0, display="0.0", teams=(("2", "BOS"), ("4", "CHI"))):
+    return {
+        "date": "2026-10-26T23:30Z",
+        "status": {"clock": clock, "displayClock": display, "period": period, "type": {"state": state}},
+        "competitions": [{"competitors": [{"team": {"id": i, "abbreviation": a}} for i, a in teams]}],
+    }
+
+
+def test_live_games_read_state_and_share_left_from_the_scoreboard():
+    board = {
+        "events": [
+            scoreboard_event("pre"),
+            scoreboard_event("in", period=3, clock=360.0, display="6:00", teams=(("27", "WSH"), ("21", "PHX"))),
+            scoreboard_event("in", period=5, clock=100.0, display="1:40", teams=(("9", "GS"), ("13", "LAL"))),
+            scoreboard_event("post", period=4, teams=(("5", "CLE"), ("16", "MIN"))),
+        ]
+    }
+    games = {g.pro_team: g for g in parse.parse_live_games(board)}
+    assert set(games) == {"BOS", "CHI", "WAS", "PHO", "GSW", "LAL", "CLE", "MIN"}  # fantasy codes, by team id
+    assert (games["BOS"].state, games["BOS"].remaining) == ("pre", 1.0)
+    assert games["BOS"].tip_at == datetime(2026, 10, 26, 23, 30, tzinfo=UTC)
+    assert (games["WAS"].state, games["WAS"].period, games["WAS"].clock) == ("live", 3, "6:00")
+    assert games["WAS"].remaining == 0.375  # 30 of 48 minutes played
+    assert (games["LAL"].state, games["LAL"].remaining) == ("live", 0.0)  # overtime: nothing projected
+    assert (games["MIN"].state, games["MIN"].remaining) == ("final", 0.0)
+
+
+def test_live_games_estimated_from_tips_when_the_scoreboard_is_down():
+    tip = datetime(2026, 10, 26, 23, 0, tzinfo=UTC)
+    games = {
+        g.pro_team: g
+        for g in parse.estimate_live_games({"BOS": tip, "LAL": tip + parse.GAME_LENGTH}, tip + parse.GAME_LENGTH / 2)
+    }
+    assert (games["BOS"].state, games["BOS"].remaining) == ("live", 0.5)
+    assert (games["LAL"].state, games["LAL"].remaining) == ("pre", 1.0)
+    [final] = parse.estimate_live_games({"BOS": tip}, tip + parse.GAME_LENGTH)
+    assert (final.state, final.remaining) == ("final", 0.0)
 
 
 def raw_player(player_id=7, sp=2, source=0, split=5, **stats):

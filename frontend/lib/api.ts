@@ -84,20 +84,33 @@ export type Player = {
 // Counting stats plus FGM/FGA/FTM/FTA; percentages are derived from makes and attempts.
 export type Stats = Record<string, number>;
 
+export type Game = { state: "pre" | "live" | "final"; status: string; tip_at: string | null };
+
 export type LineupCell = {
   slot: string | null;
   opponent: string | null;
   counts: boolean;
-  actual: boolean;
+  actual: boolean; // a box score: a past day's, or today's so far once his game tips
   stats: Stats;
+  projected: Stats; // the game's projected final; differs from stats only while it's live
+  game: Game | null; // today's game; null on other days
+};
+
+export type LineupDay = {
+  day: string;
+  played: boolean;
+  actual: Stats; // counted box scores (today's so far)
+  projected: Stats; // counted projected finals
+  starts: number;
+  missed_starts: number | null;
 };
 
 export type TeamLineup = {
   team_id: number;
   matchup_period: number;
-  days: { day: string; played: boolean; totals: Stats; starts: number; missed_starts: number | null }[];
+  days: LineupDay[];
   players: { player: Player; cells: LineupCell[]; totals: Stats }[];
-  totals: Stats;
+  totals: Stats; // the week's projected final
 };
 
 export type StreamRow = {

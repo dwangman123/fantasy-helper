@@ -5,7 +5,9 @@ Each draw walks the remaining days. A player with a game that day plays with
 probability `p_play`, and the league's starting slots then decide who starts
 (`lineup.assign_starters`, highest priority first), since benched games don't
 count. A started game adds the player's per-game rate times an optional per-stat
-factor for that game (e.g. an opponent adjustment).
+factor for that game (e.g. an opponent adjustment). Games that have tipped are
+locked: a starter keeps his slot and adds only the part of the game still to
+play (its factor is scaled down), and a benched one adds nothing.
 
 Team totals are sampled per draw rather than player by player: a sum of Poissons
 is Poisson, and a sum of negative binomials with variance = phi * mean is again
@@ -32,7 +34,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from fantasy_helper.analytics.discrete import binom_ppf, nbinom_ppf, poisson_ppf
-from fantasy_helper.analytics.lineup import assign_starters
+from fantasy_helper.analytics.lineup import NON_STARTING_SLOTS, assign_starters
 from fantasy_helper.categories import Category
 from fantasy_helper.domain import STAT_KEYS
 
@@ -51,6 +53,9 @@ class SimPlayer:
     games: dict[int, dict[str, float]] = field(default_factory=dict)
     p_play: float = 1.0
     priority: float = 0.0  # higher starts first on crowded days
+    # Day -> the slot he's locked into because his game has tipped. A locked starter keeps
+    # his slot (even once his game is over and gone from `games`); a locked bench player adds nothing.
+    locked: dict[int, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -95,28 +100,45 @@ def _remaining_means(
     order = sorted(range(len(players)), key=lambda i: -players[i].priority)
     means = np.zeros((n_sims, len(STAT_KEYS)))
     games = np.zeros(n_sims)
-    starters_cache: dict[tuple[int, ...], set[int]] = {}
+    starters_cache: dict[tuple, set[int]] = {}
     for day in days:
-        playing = [i for i in order if day in players[i].games]
+        # Games that have tipped are locked: their starters always count and hold their slots,
+        # so the lineup cap only places everyone else, in the slots left over.
+        counts = dict(slot_counts)
+        for p in players:
+            slot = p.locked.get(day)
+            if slot is not None and slot not in NON_STARTING_SLOTS:
+                counts[slot] = max(counts.get(slot, 0) - 1, 0)
+        locked = [i for i in order if day in players[i].games and day in players[i].locked]
+        starters = [i for i in locked if players[i].locked[day] not in NON_STARTING_SLOTS]
+        if starters:
+            available = np.column_stack([_available(players[i], day, n_sims, seed, side) for i in starters])
+            means += available.astype(float) @ (rates[starters] * _factors(players, starters, day))
+            games += available.sum(axis=1)
+        playing = [i for i in order if day in players[i].games and day not in players[i].locked]
         if not playing:
             continue
         available = np.column_stack([_available(players[i], day, n_sims, seed, side) for i in playing])
-        factors = np.array([[players[i].games[day].get(k, 1.0) for k in STAT_KEYS] for i in playing])
-        contrib = rates[playing] * factors
+        contrib = rates[playing] * _factors(players, playing, day)
+        cache_key = tuple(sorted(counts.items()))
         # Only day-to-day players vary between draws, so there are few distinct patterns.
         # Each row is packed into one integer code to find them quickly.
         codes = available.astype(np.int64) @ (1 << np.arange(len(playing), dtype=np.int64))
         patterns, inverse = np.unique(codes, return_inverse=True)
         for j, code in enumerate(patterns.tolist()):
             avail_ids = tuple(i for bit, i in enumerate(playing) if code >> bit & 1)
-            if avail_ids not in starters_cache:
+            if (avail_ids, cache_key) not in starters_cache:
                 candidates = [(i, players[i].eligible_slots) for i in avail_ids]
-                starters_cache[avail_ids] = set(assign_starters(candidates, slot_counts))
-            started = np.array([i in starters_cache[avail_ids] for i in playing])
+                starters_cache[avail_ids, cache_key] = set(assign_starters(candidates, counts))
+            started = np.array([i in starters_cache[avail_ids, cache_key] for i in playing])
             rows = inverse == j
             means[rows] += contrib[started].sum(axis=0)
             games[rows] += started.sum()
     return means, games
+
+
+def _factors(players: list[SimPlayer], idx: list[int], day: int) -> np.ndarray:
+    return np.array([[players[i].games[day].get(k, 1.0) for k in STAT_KEYS] for i in idx])
 
 
 def _draw_counts(mean: np.ndarray, phi: float, u: np.ndarray) -> np.ndarray:

@@ -88,3 +88,35 @@ def test_small_roster_change_moves_odds_a_little_not_by_noise():
     assert {k: v for k, v in more.cat_probs.items() if k != "PTS"} == {
         k: v for k, v in base.cat_probs.items() if k != "PTS"
     }
+
+
+def locked(pid, slot, rest=None, **rate):
+    """A player whose game today (day 1) has tipped; `rest` is the share still to play (None: final)."""
+    p = player(pid, days=(1,) if rest else (), **rate)
+    if rest:
+        p.games[1] = {k: rest for k in STAT_KEYS}
+    p.locked[1] = slot
+    return p
+
+
+def test_a_final_locked_starter_keeps_his_slot_and_adds_nothing():
+    one_seat = {"UT": 1, "BE": 3}
+    team = [locked(1, "UT", PTS=30), player(2, days=(1,), PTS=20)]
+    pred = simulate_matchup([PTS], {"home": {"PTS": 30}, "away": {}}, {"home": team, "away": []}, [1], one_seat, 50)
+    assert pred.expected_games["home"] == 0 and pred.projected_totals["home"]["PTS"] == 30  # just the actual
+
+
+def test_a_live_locked_starter_adds_the_rest_of_his_game():
+    one_seat = {"UT": 1, "BE": 3}
+    team = [locked(1, "UT", rest=0.25, PTS=20), player(2, days=(1,), PTS=40)]
+    pred = simulate_matchup([PTS], {"home": {"PTS": 12}, "away": {}}, {"home": team, "away": []}, [1], one_seat, 4000)
+    assert pred.expected_games["home"] == 1  # the seat is his, however good the other player is
+    assert pred.projected_totals["home"]["PTS"] == pytest.approx(12 + 20 * 0.25, abs=0.2)
+
+
+def test_a_locked_bench_player_adds_nothing_and_frees_no_seat():
+    one_seat = {"UT": 1, "BE": 3}
+    team = [locked(1, "BE", rest=0.5, PTS=30), player(2, days=(1,), PTS=10)]
+    pred = simulate_matchup([PTS], {"home": {}, "away": {}}, {"home": team, "away": []}, [1], one_seat, 4000)
+    assert pred.expected_games["home"] == 1
+    assert pred.projected_totals["home"]["PTS"] == pytest.approx(10, abs=0.2)

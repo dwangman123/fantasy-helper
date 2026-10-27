@@ -7,10 +7,22 @@ import numpy as np
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+from fantasy_helper.analytics.actuals import week_actuals
 from fantasy_helper.calendar import load_calendar
 from fantasy_helper.categories import KNOWN_CATEGORIES, categories_from_scoring_items
 from fantasy_helper.db import models as m
-from fantasy_helper.domain import DailySlot, LeagueSnapshot, Matchup, Player, ProGame, RosterEntry, StatLine, Team
+from fantasy_helper.domain import (
+    DailySlot,
+    LeagueSnapshot,
+    LiveGame,
+    Matchup,
+    Player,
+    PlayerGameStat,
+    ProGame,
+    RosterEntry,
+    StatLine,
+    Team,
+)
 from fantasy_helper.ingest.store import store_snapshot
 
 SEASON = 2027
@@ -84,28 +96,43 @@ def league_snapshot(matchup_period: int = 3, day_of_week: int = 3, n_free_agents
     for _ in range(n_free_agents):
         add_player(rng.uniform(0.5, 0.9), status="OUT" if rng.random() < 0.05 else "ACTIVE")
 
-    # Actual totals so far this week: each player's expected stats on the days already played.
+    # Box scores on the days already played this week: each player's expected stats, a little low.
     pro_team = {p.player_id: p.pro_team for p in players}
-    played = {
-        (g.pro_team, g.scoring_period) for g in pro_games if week.first_scoring_period <= g.scoring_period < today
-    }
+    playing = {(g.pro_team, g.scoring_period) for g in pro_games}
     projected = {s.player_id: s.per_game for s in lines if s.window == "projected"}
 
-    def actual(team_id: int) -> dict[str, float]:
-        totals = dict.fromkeys(["PTS", "REB", "AST", "STL", "BLK", "3PM", "TO", "FGM", "FGA", "FTM", "FTA"], 0.0)
-        for r in rosters:
-            if r.team_id != team_id or r.lineup_slot == "IR":
-                continue
-            games = sum((pro_team[r.player_id], d) in played for d in range(week.first_scoring_period, today))
-            for k in totals:
-                totals[k] += round(projected[r.player_id][k] * games * 0.8)
-        totals["FG%"] = totals["FGM"] / totals["FGA"] if totals["FGA"] else 0.0
-        totals["FT%"] = totals["FTM"] / totals["FTA"] if totals["FTA"] else 0.0
-        return totals
+    def box(r: RosterEntry, day: int, share: float) -> PlayerGameStat:
+        stats = {k: float(round(v * share)) for k, v in projected[r.player_id].items()}
+        return PlayerGameStat(r.player_id, day, pro_team[r.player_id], 30.0 * share, stats, r.team_id, r.lineup_slot)
+
+    game_stats = [
+        box(r, day, 0.8)
+        for day in range(week.first_scoring_period, today)
+        for r in rosters
+        if r.lineup_slot != "IR" and (pro_team[r.player_id], day) in playing
+    ]
+    # Today: a third of the NBA teams playing are final, a third live (3rd quarter, 6:00 left), the rest to come.
+    teams_today = sorted(g.pro_team for g in pro_games if g.scoring_period == today)
+    third = len(teams_today) // 3
+    states = [("final", 4, "0.0", 0.0), ("live", 3, "6:00", 0.375), ("pre", 0, "", 1.0)]
+    live_games = [
+        LiveGame(t, datetime(2026, 1, 1, tzinfo=UTC), *states[min(i // third, 2)]) for i, t in enumerate(teams_today)
+    ]
+    shares = {g.pro_team: 1.0 if g.state == "final" else 0.6 for g in live_games if g.state != "pre"}
+    live_stats = [
+        box(r, today, shares[pro_team[r.player_id]])
+        for r in rosters
+        if r.lineup_slot != "IR" and pro_team[r.player_id] in shares
+    ]
+
+    # ESPN's matchup totals, which match the completed days' started box scores.
+    def espn_totals(team_id: int) -> dict[str, float]:
+        totals = week_actuals(game_stats).get(team_id, {})
+        return {**totals, "FG%": totals["FGM"] / totals["FGA"], "FT%": totals["FTM"] / totals["FTA"]} if totals else {}
 
     pairs = [(MY_TEAM, 7), (1, 2), (3, 5), (6, 8), (9, 10)]
     matchups = [
-        Matchup(100 * matchup_period + i, matchup_period, h, a, "UNDECIDED", "NONE", actual(h), actual(a))
+        Matchup(100 * matchup_period + i, matchup_period, h, a, "UNDECIDED", "NONE", espn_totals(h), espn_totals(a))
         for i, (h, a) in enumerate(pairs)
     ]
     return LeagueSnapshot(
@@ -134,6 +161,9 @@ def league_snapshot(matchup_period: int = 3, day_of_week: int = 3, n_free_agents
             if day >= today
             for r in rosters
         ],
+        game_stats=game_stats,
+        live_stats=live_stats,
+        live_games=live_games,
     )
 
 

@@ -81,7 +81,7 @@ class CategoryOdds(BaseModel):
     key: str
     is_percentage: bool
     reverse: bool
-    now_me: float | None
+    now_me: float | None  # started box scores so far, live games included; None: a percentage with no attempt
     now_opp: float | None
     proj_me: float
     proj_opp: float
@@ -128,24 +128,35 @@ class PlayerOut(BaseModel):
     z_total: float
 
 
+class GameOut(BaseModel):
+    """A game today: "pre" (not started), "live" or "final"."""
+
+    state: str
+    status: str  # e.g. "Q3 5:21", "OT 1:02", "Final"; empty before the tip
+    tip_at: UtcDatetime | None
+
+
 class LineupCell(BaseModel):
     slot: str | None  # None: not on the team that day, or a played day without a box score
     opponent: str | None  # None: no game
     counts: bool  # a started game, so it adds to the team's totals
-    actual: bool  # box score; otherwise projected (rate x opponent factor x chance of playing)
+    actual: bool  # box score (today's so far once his game tips); otherwise projected
     stats: dict[str, float]  # counting stats plus FGM/FGA/FTM/FTA
+    projected: dict[str, float]  # the game's projected final; differs from stats only while it's live
+    game: GameOut | None  # today's game; None on other days
 
 
 class LineupPlayer(BaseModel):
     player: PlayerOut
     cells: list[LineupCell]  # one per day of the week
-    totals: dict[str, float]  # counted games only
+    totals: dict[str, float]  # counted games' projected finals
 
 
 class LineupDay(BaseModel):
     day: date
     played: bool
-    totals: dict[str, float]  # counted games only
+    actual: dict[str, float]  # counted box scores (today's so far); zeros on days ahead
+    projected: dict[str, float]  # counted projected finals
     starts: float  # started games; from today, weighted by the chance of playing
     missed_starts: int | None  # extra games the best lineup would start; None once played
 
@@ -157,7 +168,7 @@ class TeamLineup(BaseModel):
     matchup_period: int
     days: list[LineupDay]
     players: list[LineupPlayer]
-    totals: dict[str, float]
+    totals: dict[str, float]  # the week's projected final
 
 
 class BoardEntry(BaseModel):

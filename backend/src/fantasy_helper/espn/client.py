@@ -4,35 +4,32 @@ plus NBA opponent stats from ESPN's public site API."""
 import json
 import urllib.request
 from collections.abc import Collection
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from espn_api.basketball import League
 
 from fantasy_helper.calendar import load_calendar
 from fantasy_helper.categories import categories_from_scoring_items
 from fantasy_helper.config import Settings
-from fantasy_helper.domain import DailySlot, LeagueSnapshot, OpponentStats, PlayerGameStat
+from fantasy_helper.domain import DailySlot, LeagueSnapshot, LiveGame, OpponentStats, PlayerGameStat
 from fantasy_helper.espn import parse
 
 
-def days_to_fetch(current_scoring_period: int, stored_days: Collection[int]) -> list[int]:
-    """Completed days missing from the box-score history, plus the latest completed day
-    again so ESPN's overnight stat corrections are picked up."""
+def days_to_fetch(
+    current_scoring_period: int, stored_days: Collection[int], week_days: Collection[int] = ()
+) -> list[int]:
+    """Completed days missing from the box-score history, plus this week's completed days
+    and the latest completed day again, so ESPN's stat corrections are picked up: this
+    week's "now" totals are summed from these box scores."""
     completed = set(range(1, current_scoring_period))
-    latest = {current_scoring_period - 1} & completed
-    return sorted((completed - set(stored_days)) | latest)
+    again = ({current_scoring_period - 1} | set(week_days)) & completed
+    return sorted((completed - set(stored_days)) | again)
 
 
 def fetch_game_stats(league: League, scoring_period: int, free_agent_pool_size: int) -> list[PlayerGameStat]:
     """Every rostered player's box score for one past day, plus the top free agents'."""
-    games: dict[int, PlayerGameStat] = {}
     rosters = league.espn_request.league_get(params={"view": "mRoster", "scoringPeriodId": scoring_period})
-    for team in rosters["teams"]:
-        for entry in team["roster"]["entries"]:
-            player = entry["playerPoolEntry"]["player"]
-            g = parse.parse_game_stat(player, scoring_period, int(team["id"]), entry.get("lineupSlotId"))
-            if g:
-                games[g.player_id] = g
+    games = {g.player_id: g for g in parse.parse_day_stats(rosters["teams"], scoring_period)}
     fa_filter = {
         "players": {
             "filterStatus": {"value": ["FREEAGENT", "WAIVERS"]},
@@ -51,21 +48,32 @@ def fetch_game_stats(league: League, scoring_period: int, free_agent_pool_size: 
     return list(games.values())
 
 
-def fetch_daily_lineups(league: League, scoring_periods: Collection[int]) -> list[DailySlot]:
-    """Every team's set lineup on each of these days; ESPN answers for future days too."""
-    return [
-        slot
-        for day in scoring_periods
-        for slot in parse.parse_daily_lineups(
-            league.espn_request.league_get(params={"view": "mRoster", "scoringPeriodId": day})["teams"], day
-        )
-    ]
+def fetch_daily_lineups(
+    league: League, scoring_periods: Collection[int], today: int
+) -> tuple[list[DailySlot], list[PlayerGameStat]]:
+    """Every team's set lineup on each of these days (ESPN answers for future days too),
+    plus today's box scores so far, which come in the same response."""
+    slots, live = [], []
+    for day in scoring_periods:
+        teams = league.espn_request.league_get(params={"view": "mRoster", "scoringPeriodId": day})["teams"]
+        slots += parse.parse_daily_lineups(teams, day)
+        if day == today:
+            live = parse.parse_day_stats(teams, day)
+    return slots, live
 
 
-# ESPN's public (undocumented) NBA stats API; may change without notice.
+# ESPN's public (undocumented) NBA APIs; may change without notice.
 OPPONENT_STATS_URL = (
     "https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/statistics/byteam?category=opponent&limit=30"
 )
+SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates={day:%Y%m%d}"
+
+
+def fetch_live_games(day: date) -> list[LiveGame]:
+    """Each NBA game's state on one day: not started, live (with the clock) or final."""
+    request = urllib.request.Request(SCOREBOARD_URL.format(day=day), headers={"User-Agent": "fantasy-helper"})
+    with urllib.request.urlopen(request, timeout=30) as response:
+        return parse.parse_live_games(json.load(response))
 
 
 def fetch_opponent_stats() -> list[OpponentStats]:
@@ -101,19 +109,25 @@ def fetch_snapshot(settings: Settings, stored_game_days: Collection[int] = ()) -
     # mMatchup, not mMatchupScore: only mMatchup includes per-category totals (scoreByStat).
     schedule = league.espn_request.league_get(params={"view": "mMatchup"})["schedule"]
     raw_settings = league.espn_request.league_get(params={"view": "mSettings"})["settings"]
+    today = int(league.scoringPeriodId)
+    week = calendar.week(int(league.currentMatchupPeriod))
     game_stats = [
         g
-        for day in days_to_fetch(int(league.scoringPeriodId), stored_game_days)
+        for day in days_to_fetch(today, stored_game_days, week.scoring_periods)
         for g in fetch_game_stats(league, day, settings.free_agent_pool_size)
     ]
-    week = calendar.week(int(league.currentMatchupPeriod))
-    lineup_days = [d for d in week.scoring_periods if d >= int(league.scoringPeriodId)]
+    daily_lineups, live_stats = fetch_daily_lineups(league, [d for d in week.scoring_periods if d >= today], today)
     warnings = []
     try:
         opponent_stats = fetch_opponent_stats()
     except Exception as exc:  # optional input: predictions fall back to no opponent adjustment
         opponent_stats = []
         warnings.append(f"Opponent stats unavailable, keeping the last stored ones: {exc!r}")
+    try:
+        live_games = fetch_live_games(calendar.date_for(today))
+    except Exception as exc:  # estimate from tip times rather than double-count or drop today's games
+        live_games = parse.estimate_live_games(parse.tips(list(all_players.values()), today), datetime.now(UTC))
+        warnings.append(f"NBA scoreboard unavailable, estimating today's games from tip times: {exc!r}")
 
     return LeagueSnapshot(
         league_id=settings.league_id,
@@ -132,9 +146,10 @@ def fetch_snapshot(settings: Settings, stored_game_days: Collection[int] = ()) -
         fetched_at=datetime.now(UTC),
         lineup_slot_counts=parse.parse_lineup_slot_counts(raw_settings["rosterSettings"]),
         scoring_type=raw_settings["scoringSettings"].get("scoringType"),
-        first_tip_at=parse.first_tip(list(all_players.values()), int(league.scoringPeriodId)),
         game_stats=game_stats,
         opponent_stats=opponent_stats,
-        daily_lineups=fetch_daily_lineups(league, lineup_days),
+        daily_lineups=daily_lineups,
+        live_stats=live_stats,
+        live_games=live_games,
         warnings=warnings,
     )
