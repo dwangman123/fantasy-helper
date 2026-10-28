@@ -43,6 +43,16 @@ recent adds, drops and trades.
 Still to verify: that ESPN's daily rosters update box scores during a game (checked only after
 games ended).
 
+**Week 4 (trades, League page): done.** A trade is scored for both teams the way Hold scores a
+pickup: the change in expected categories won per week against a league-average team over the
+rest of the season, plus the change in the chance to win a week, with each side's forced roster
+moves (a drop to make room, or a free agent for an open spot). The Trades page lists deals found by
+searching every 1-for-1 and 2-for-1 trade with every other team and keeping those that help both
+sides, and evaluates any deal of up to 3 players a side. The League page has power rankings
+(rest-of-season all-play strength next to the all-play record so far) and a 10-team category
+heatmap with punts marked. The measure can call a lopsided deal a gain for a team that punts the
+star's categories, so each player's z-score value is shown next to him (see PROJECT_PLAN.md).
+
 ## Backend quickstart
 
 Requires [uv](https://docs.astral.sh/uv/). Python 3.12 is installed by uv automatically.
@@ -89,15 +99,17 @@ backend/
     db/              SQLAlchemy models + session
     ingest/          snapshot persistence + `fh-ingest` job
     analytics/       pure functions: z-scores, team profiles, blended rates, lineup cap,
-                     opponent factors, dispersion fit, matchup simulation, waiver rankings
+                     opponent factors, dispersion fit, matchup simulation, waiver rankings,
+                     trade evaluation and finder, power rankings
     context.py       stored snapshot -> analytics inputs (rates, games, priorities)
     predict.py       current-week predictions from stored data + `fh-predict`
     waivers.py       stream/hold rankings for one team + `fh-waivers`
+    trades.py        trade evaluation and the trade finder for one team
     api/             FastAPI app (`fh-api`)
   alembic/           migrations
   data/              per-season matchup calendars
   tests/
-frontend/            Next.js + TanStack Query: Matchup and Waivers pages
+frontend/            Next.js + TanStack Query: Matchup, Team, League, Waivers and Trades pages
 ```
 
 ## Data notes
