@@ -82,7 +82,6 @@ def waiver_report(
     days = ctx.days_left
     first_day = ctx.scoring_period if same_day else ctx.scoring_period + 1
     fa_ids = ctx.free_agent_ids()
-    z = {pid: pz.by_cat for pid, pz in ctx.z.items()}
     stream = rank_stream(
         ctx.categories,
         {"home": ctx.actual(mu.home_team_id), "away": ctx.actual(mu.away_team_id)},
@@ -93,7 +92,6 @@ def waiver_report(
         ctx.slot_counts,
         [ctx.sim_player(pid, days) for pid in fa_ids],
         drops,
-        z,
         limit=max_adds,
         n_sims=n_sims,
         seed=seed + mu.espn_id,  # the same random numbers as this matchup's prediction
@@ -110,7 +108,6 @@ def waiver_report(
         ctx.slot_counts,
         [ctx.sim_player(pid, hold_days, healthy=True) for pid in fa_ids],
         drops,
-        z,
         limit=max_adds,
         dispersion=ctx.dispersion,
     )

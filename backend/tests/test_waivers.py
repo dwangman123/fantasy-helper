@@ -28,11 +28,10 @@ def player(pid, days=DAYS, priority=0.0, **rate):
     return SimPlayer(pid, ANY, {k: 0.0 for k in STAT_KEYS} | rate, {d: {} for d in days}, 1.0, priority)
 
 
-def stream(cats, mine, opp, adds, drop_ids=(None,), first_day=1, z=None, days=DAYS):
-    z = z or {a.player_id: dict.fromkeys([c.key for c in cats], 1.0) for a in adds}
+def stream(cats, mine, opp, adds, drop_ids=(None,), first_day=1, days=DAYS, limit=25):
     return rank_stream(
         cats, {"home": {}, "away": {}}, {"home": mine, "away": opp}, "home", days, first_day, SLOTS,
-        adds, list(drop_ids), z, n_sims=2000,
+        adds, list(drop_ids), limit=limit, n_sims=2000,
     )  # fmt: skip
 
 
@@ -50,6 +49,7 @@ def test_help_in_a_swing_category_beats_help_in_a_locked_one():
     best, other = ranking.options
     assert best.add_id == 21 and best.d_p_win > 0.2 and best.gained == ["STL"]
     assert other.add_id == 20 and abs(other.d_p_win) < 0.01
+    assert [o.add_id for o in stream([PTS, STL, BLK], mine, opp, [scorer, thief], limit=1).options] == [21]
 
 
 def test_hurting_a_lost_category_costs_nothing():
@@ -76,8 +76,22 @@ def test_free_agent_without_a_playable_game_is_not_evaluated():
 def test_screen_prefers_games_he_would_actually_start():
     full_day = [player(i, days=(1,), priority=10) for i in range(10)]
     benched, starter = player(20, days=(1,), PTS=1), player(21, days=(2,), PTS=1)
-    z = {20: {"PTS": 1.0}, 21: {"PTS": 1.0}}
-    assert screen_stream([benched, starter], full_day, SLOTS, {"PTS": "swing"}, z, limit=1) == [starter]
+    slopes = np.array([1.0 if k == "PTS" else 0.0 for k in STAT_KEYS])
+    assert screen_stream([benched, starter], full_day, SLOTS, slopes, limit=1) == [starter]
+
+
+def test_screens_rank_more_games_above_the_same_player_with_fewer():
+    # Below my roster's per-game average, so his z-scores are negative: the screens must
+    # still count each extra game as extra help.
+    weeks = [[1, 2, 3], [4, 5, 6]]
+    days = [d for w in weeks for d in w]
+    mine = [player(i, days=days, PTS=12, STL=1) for i in range(3)]
+    opp = [player(10 + i, days=days, PTS=12, STL=1) for i in range(3)]
+    busy, idle = player(20, days=days, PTS=6, STL=0.5), player(21, days=(1, 4), PTS=6, STL=0.5)
+    week = stream([PTS, STL], mine, opp, [idle, busy], days=days, limit=1)
+    assert week.screened == 1 and [o.add_id for o in week.options] == [20]
+    season = rank_hold([PTS, STL], mine, [mine, opp], weeks, SLOTS, [idle, busy], [None], limit=1)
+    assert season.screened == 1 and [o.add_id for o in season.options] == [20]
 
 
 def test_hold_values_games_and_picks_the_weakest_drop():
@@ -86,8 +100,7 @@ def test_hold_values_games_and_picks_the_weakest_drop():
     mine = [player(i, days=days, priority=10 - i, PTS=15 - i, STL=1) for i in range(5)]
     league = [mine, [player(10 + i, days=days, PTS=12, STL=1) for i in range(5)]]
     every_day, half = player(20, days=days, PTS=14, STL=1.5), player(21, days=(1, 3, 5), PTS=14, STL=1.5)
-    z = {20: {"PTS": 1.0, "STL": 1.0}, 21: {"PTS": 1.0, "STL": 1.0}}
-    ranking = rank_hold([PTS, STL], mine, league, weeks, SLOTS, [every_day, half], [4, 3], z)
+    ranking = rank_hold([PTS, STL], mine, league, weeks, SLOTS, [every_day, half], [4, 3])
     every, half = ranking.options
     assert (every.add_id, every.drop_id, half.add_id) == (20, 4, 21)
     # Half the games of my weakest player is a step down, despite the better per-game line.

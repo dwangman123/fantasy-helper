@@ -35,7 +35,7 @@ from itertools import combinations
 import numpy as np
 
 from fantasy_helper.analytics.matchup import SimPlayer
-from fantasy_helper.analytics.waivers import day_totals, weekly_cat_p_win, weekly_totals
+from fantasy_helper.analytics.waivers import cat_slopes, day_totals, weekly_cat_p_win, weekly_stats, weekly_totals
 from fantasy_helper.analytics.zscores import pct
 from fantasy_helper.categories import Category
 from fantasy_helper.domain import STAT_KEYS
@@ -59,47 +59,6 @@ def week_odds(cat_p_win: dict[str, np.ndarray]) -> tuple[np.ndarray, np.ndarray]
         dist = nxt
     won = 2 * np.arange(n + 1)
     return dist[:, won > n].sum(axis=1), dist[:, won == n].sum(axis=1)
-
-
-def _div(num: np.ndarray, den: np.ndarray) -> np.ndarray:
-    return np.divide(num, den, out=np.zeros_like(num), where=den > 0)
-
-
-def _density(diff: np.ndarray, sd: np.ndarray) -> np.ndarray:
-    """Normal density of the margin at zero: the slope of P(win) per unit of margin."""
-    z = _div(diff, sd)
-    return _div(np.exp(-(z**2) / 2) / np.sqrt(2 * np.pi), sd)
-
-
-def cat_slopes(me: np.ndarray, opp: np.ndarray, categories: list[Category], dispersion: dict[str, float]) -> np.ndarray:
-    """Change in expected categories won per unit of each weekly stat total (weeks x
-    STAT_KEYS), at the same normal approximation as `weekly_cat_p_win`."""
-    slopes = np.zeros_like(me)
-    for cat in categories:
-        if cat.is_percentage:
-            makes, attempts = _COL[cat.makes], _COL[cat.attempts]
-            pm, po = _div(me[:, makes], me[:, attempts]), _div(opp[:, makes], opp[:, attempts])
-            sd = np.sqrt(_div(pm * (1 - pm), me[:, attempts]) + _div(po * (1 - po), opp[:, attempts]))
-            dens = _density(pm - po, sd)
-            slopes[:, makes] += _div(dens, me[:, attempts])  # d pct / d makes = 1 / attempts
-            slopes[:, attempts] -= _div(dens * pm, me[:, attempts])  # d pct / d attempts = -pct / attempts
-        else:
-            col = _COL[cat.key]
-            m, o = me[:, col], opp[:, col]
-            dens = _density(m - o, np.sqrt(dispersion.get(cat.key, 1.0) * (m + o)))
-            slopes[:, col] += -dens if cat.reverse else dens
-    return slopes
-
-
-def weekly_stats(p: SimPlayer, weeks: list[list[int]]) -> np.ndarray:
-    """A player's expected stats in each week if he started every game he has (weeks x STAT_KEYS)."""
-    rates = np.array([p.per_game[k] for k in STAT_KEYS])
-    out = np.zeros((len(weeks), len(STAT_KEYS)))
-    for i, week in enumerate(weeks):
-        for d in week:
-            if d in p.games:
-                out[i] += rates * np.array([p.games[d].get(k, 1.0) for k in STAT_KEYS])
-    return out
 
 
 @dataclass

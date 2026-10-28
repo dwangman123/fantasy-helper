@@ -19,11 +19,19 @@ P(win) per category is a normal approximation: variance phi * mean for counting
 stats, p(1 - p) / attempts for percentages.
 
 Keeping it fast. Every add x drop pair costs a full evaluation, so free agents are
-screened first by z-score value times games. Stream counts the games he would
-start this week and only swing categories; hold counts all remaining games,
-with each category weighted by 4p(1 - p) at my baseline P(win) against the
-league average, which is largest where I'm closest to even. Drops are limited
-to my lowest-priority players (the caller picks them).
+screened first by a first-order estimate of the categories he adds, as in the
+trade finder: his expected stat totals times the slope of my expected categories
+won per unit of each stat (the normal density of the margin at zero). The slope is
+steepest in a close category and near zero in a locked or lost one, and totals
+grow with games, so more games count as more help. (Z-scores times games got
+that backwards: z is measured against rostered players, so nearly every free
+agent's is negative.) Stream counts the games he would start this week, with my
+weakest drop gone and everyone else who can play playing, and takes the slopes
+from the baseline simulation; it ignores a pickup bumping one of my starters.
+Hold counts all his remaining games, ignoring the lineup cap, with slopes at my
+expected weekly totals against the league average. The dropped player is the
+same for every free agent, so the screen leaves him out. Drops are limited to my
+lowest-priority players (the caller picks them).
 """
 
 from dataclasses import dataclass, replace
@@ -32,7 +40,7 @@ import numpy as np
 from scipy.special import ndtr
 
 from fantasy_helper.analytics.lineup import assign_starters
-from fantasy_helper.analytics.matchup import MatchupPrediction, SimPlayer, score_matchup, simulate_side
+from fantasy_helper.analytics.matchup import MatchupPrediction, SideDraws, SimPlayer, score_matchup, simulate_side
 from fantasy_helper.categories import Category
 from fantasy_helper.domain import STAT_KEYS
 
@@ -99,32 +107,43 @@ class StreamRanking:
     screened: int  # free agents evaluated after the screen
 
 
-def _starts_this_week(add: SimPlayer, mine: list[SimPlayer], slot_counts: dict[str, int]) -> float:
-    """Expected games he'd start, assuming everyone else who can play does."""
-    starts = 0.0
-    for day in add.games:
+def _started_stats(add: SimPlayer, mine: list[SimPlayer], slot_counts: dict[str, int]) -> np.ndarray:
+    """Expected stats from the games he'd start, assuming everyone else who can play does."""
+    total = np.zeros(len(STAT_KEYS))
+    for day, factors in add.games.items():
         playing = sorted([p for p in mine if day in p.games and p.p_play > 0] + [add], key=lambda p: -p.priority)
         if add.player_id in assign_starters([(p.player_id, p.eligible_slots) for p in playing], slot_counts):
-            starts += add.p_play
-    return starts
+            total += [add.p_play * add.per_game[k] * factors.get(k, 1.0) for k in STAT_KEYS]
+    return total
+
+
+def draw_slopes(categories: list[Category], mine: SideDraws, opp: SideDraws) -> np.ndarray:
+    """Change in my expected categories won per unit of each of my stat totals this week
+    (STAT_KEYS), from a normal fit to the simulated margin in each category."""
+    margins = [mine.finals[cat.key] - opp.finals[cat.key] for cat in categories]
+    dens = _density(np.array([m.mean() for m in margins]), np.array([m.std() for m in margins]))
+    slopes = np.zeros(len(STAT_KEYS))
+    for cat, d in zip(categories, dens, strict=True):
+        if cat.is_percentage:
+            makes, attempts = mine.finals[cat.makes].mean(), mine.finals[cat.attempts].mean()
+            if attempts > 0:
+                slopes[_COL[cat.makes]] += d / attempts  # d pct / d makes = 1 / attempts
+                slopes[_COL[cat.attempts]] -= d * makes / attempts**2  # d pct / d attempts = -pct / attempts
+        else:
+            slopes[_COL[cat.key]] += -d if cat.reverse else d
+    return slopes
 
 
 def screen_stream(
-    adds: list[SimPlayer],
-    mine: list[SimPlayer],
-    slot_counts: dict[str, int],
-    board: dict[str, str],
-    z: dict[int, dict[str, float]],
-    limit: int,
+    adds: list[SimPlayer], mine: list[SimPlayer], slot_counts: dict[str, int], slopes: np.ndarray, limit: int
 ) -> list[SimPlayer]:
-    """Free agents most likely to move a swing category this week. `adds` hold only the
-    games they can play."""
-    targets = [k for k, label in board.items() if label == SWING] or list(board)
+    """Free agents whose starts this week add the most expected categories, to first order.
+    `adds` hold only the games they can play; `slopes` come from `draw_slopes`."""
     scored = []
     for add in adds:
-        starts = _starts_this_week(add, mine, slot_counts) if add.p_play > 0 else 0.0
-        if starts > 0:
-            scored.append((starts * sum(z[add.player_id][k] for k in targets), add))
+        stats = _started_stats(add, mine, slot_counts) if add.p_play > 0 else np.zeros(len(STAT_KEYS))
+        if stats.any():
+            scored.append((float(stats @ slopes), add))
     scored.sort(key=lambda s: s[0], reverse=True)
     return [add for _, add in scored[:limit]]
 
@@ -149,7 +168,6 @@ def rank_stream(
     slot_counts: dict[str, int],
     adds: list[SimPlayer],
     drop_ids: list[int | None],
-    z: dict[int, dict[str, float]],
     limit: int = 25,
     n_sims: int = 5000,
     seed: int = 0,
@@ -161,24 +179,27 @@ def rank_stream(
     other = "away" if side == "home" else "home"
     opp = simulate_side(categories, actual[other], players[other], days, slot_counts, other, n_sims, seed, dispersion)
 
-    def run(mine: list[SimPlayer]) -> SideView:
-        draws = {other: opp}
-        draws[side] = simulate_side(categories, actual[side], mine, days, slot_counts, side, n_sims, seed, dispersion)
+    def draw(mine: list[SimPlayer]) -> SideDraws:
+        return simulate_side(categories, actual[side], mine, days, slot_counts, side, n_sims, seed, dispersion)
+
+    def run(mine: SideDraws) -> SideView:
+        draws = {other: opp, side: mine}
         return side_view(score_matchup(categories, draws["home"], draws["away"]), side)
 
-    base = run(players[side])
+    base_draws = draw(players[side])
+    base = run(base_draws)
     board = category_board(base.cat_p_win)
     adds = [_games_between(a, first=first_day) for a in adds]
     weakest = drop_ids[0] if drop_ids else None
     screen_roster = [p for p in players[side] if p.player_id != weakest]
-    candidates = screen_stream(adds, screen_roster, slot_counts, board, z, limit)
+    candidates = screen_stream(adds, screen_roster, slot_counts, draw_slopes(categories, base_draws, opp), limit)
 
     favored = {k: base.cat_p_win[k] > base.cat_p_loss[k] for k in base.cat_p_win}
     options = []
     for add in candidates:
         for drop_id in drop_ids:
             mine = [_games_between(p, before=first_day) if p.player_id == drop_id else p for p in players[side]]
-            r = run([*mine, add])
+            r = run(draw([*mine, add]))
             now = {k: r.cat_p_win[k] > r.cat_p_loss[k] for k in r.cat_p_win}
             options.append(
                 StreamOption(
@@ -254,11 +275,47 @@ def weekly_cat_p_win(
     return out
 
 
-def screen_hold(
-    adds: list[SimPlayer], cat_p_win: dict[str, float], z: dict[int, dict[str, float]], limit: int
-) -> list[SimPlayer]:
-    weights = {k: 4 * p * (1 - p) for k, p in cat_p_win.items()}
-    scored = [(len(a.games) * sum(w * z[a.player_id][k] for k, w in weights.items()), a) for a in adds if a.games]
+def _density(diff: np.ndarray, sd: np.ndarray) -> np.ndarray:
+    """Normal density of the margin at zero: the slope of P(win) per unit of margin."""
+    z = _ratio(diff, sd)
+    return _ratio(np.exp(-(z**2) / 2) / np.sqrt(2 * np.pi), sd)
+
+
+def cat_slopes(me: np.ndarray, opp: np.ndarray, categories: list[Category], dispersion: dict[str, float]) -> np.ndarray:
+    """Change in expected categories won per unit of each weekly stat total (weeks x
+    STAT_KEYS), at the same normal approximation as `weekly_cat_p_win`."""
+    slopes = np.zeros_like(me)
+    for cat in categories:
+        if cat.is_percentage:
+            makes, attempts = _COL[cat.makes], _COL[cat.attempts]
+            pm, po = _ratio(me[:, makes], me[:, attempts]), _ratio(opp[:, makes], opp[:, attempts])
+            sd = np.sqrt(_ratio(pm * (1 - pm), me[:, attempts]) + _ratio(po * (1 - po), opp[:, attempts]))
+            dens = _density(pm - po, sd)
+            slopes[:, makes] += _ratio(dens, me[:, attempts])  # d pct / d makes = 1 / attempts
+            slopes[:, attempts] -= _ratio(dens * pm, me[:, attempts])  # d pct / d attempts = -pct / attempts
+        else:
+            col = _COL[cat.key]
+            m, o = me[:, col], opp[:, col]
+            dens = _density(m - o, np.sqrt(dispersion.get(cat.key, 1.0) * (m + o)))
+            slopes[:, col] += -dens if cat.reverse else dens
+    return slopes
+
+
+def weekly_stats(p: SimPlayer, weeks: list[list[int]]) -> np.ndarray:
+    """A player's expected stats in each week if he started every game he has (weeks x STAT_KEYS)."""
+    rates = np.array([p.per_game[k] for k in STAT_KEYS])
+    out = np.zeros((len(weeks), len(STAT_KEYS)))
+    for i, week in enumerate(weeks):
+        for d in week:
+            if d in p.games:
+                out[i] += rates * np.array([p.games[d].get(k, 1.0) for k in STAT_KEYS])
+    return out
+
+
+def screen_hold(adds: list[SimPlayer], slopes: np.ndarray, weeks: list[list[int]], limit: int) -> list[SimPlayer]:
+    """Free agents who add the most expected categories over `weeks`, to first order: every
+    game he has (no lineup cap) times my `slopes` (`cat_slopes`)."""
+    scored = [(float((slopes * weekly_stats(a, weeks)).sum()), a) for a in adds if a.games]
     scored.sort(key=lambda s: s[0], reverse=True)
     return [add for _, add in scored[:limit]]
 
@@ -271,7 +328,6 @@ def rank_hold(
     slot_counts: dict[str, int],
     adds: list[SimPlayer],
     drop_ids: list[int | None],
-    z: dict[int, dict[str, float]],
     limit: int = 25,
     dispersion: dict[str, float] | None = None,
 ) -> HoldRanking:
@@ -283,11 +339,12 @@ def rank_hold(
         return HoldRanking(0, 0.0, {}, [], 0)
     average = np.mean([weekly_totals({d: day_totals(t, d, slot_counts) for d in days}, weeks) for t in league], axis=0)
     base_days = {d: day_totals(mine, d, slot_counts) for d in days}
-    base_p = weekly_cat_p_win(weekly_totals(base_days, weeks), average, categories, dispersion)
+    base_weekly = weekly_totals(base_days, weeks)
+    base_p = weekly_cat_p_win(base_weekly, average, categories, dispersion)
     base_cats = sum(base_p.values())
     base_mean = {k: float(v.mean()) for k, v in base_p.items()}
 
-    candidates = screen_hold(adds, base_mean, z, limit)
+    candidates = screen_hold(adds, cat_slopes(base_weekly, average, categories, dispersion), weeks, limit)
     by_id = {p.player_id: p for p in mine}
     options = []
     for add in candidates:
