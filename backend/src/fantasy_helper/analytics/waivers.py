@@ -215,7 +215,7 @@ class HoldRanking:
     screened: int
 
 
-def _day_totals(players: list[SimPlayer], day: int, slot_counts: dict[str, int]) -> np.ndarray:
+def day_totals(players: list[SimPlayer], day: int, slot_counts: dict[str, int]) -> np.ndarray:
     """Expected stats from the players who'd start that day (everyone healthy)."""
     playing = sorted((p for p in players if day in p.games), key=lambda p: -p.priority)
     total = np.zeros(len(STAT_KEYS))
@@ -228,8 +228,8 @@ def _day_totals(players: list[SimPlayer], day: int, slot_counts: dict[str, int])
     return total
 
 
-def _weekly(day_totals: dict[int, np.ndarray], weeks: list[list[int]]) -> np.ndarray:
-    return np.array([sum((day_totals[d] for d in w), np.zeros(len(STAT_KEYS))) for w in weeks])
+def weekly_totals(by_day: dict[int, np.ndarray], weeks: list[list[int]]) -> np.ndarray:
+    return np.array([sum((by_day[d] for d in w), np.zeros(len(STAT_KEYS))) for w in weeks])
 
 
 def _ratio(num: np.ndarray, den: np.ndarray) -> np.ndarray:
@@ -281,9 +281,9 @@ def rank_hold(
     days = sorted({d for w in weeks for d in w})
     if not days:
         return HoldRanking(0, 0.0, {}, [], 0)
-    average = np.mean([_weekly({d: _day_totals(t, d, slot_counts) for d in days}, weeks) for t in league], axis=0)
-    base_days = {d: _day_totals(mine, d, slot_counts) for d in days}
-    base_p = weekly_cat_p_win(_weekly(base_days, weeks), average, categories, dispersion)
+    average = np.mean([weekly_totals({d: day_totals(t, d, slot_counts) for d in days}, weeks) for t in league], axis=0)
+    base_days = {d: day_totals(mine, d, slot_counts) for d in days}
+    base_p = weekly_cat_p_win(weekly_totals(base_days, weeks), average, categories, dispersion)
     base_cats = sum(base_p.values())
     base_mean = {k: float(v.mean()) for k, v in base_p.items()}
 
@@ -294,8 +294,8 @@ def rank_hold(
         for drop_id in drop_ids:
             roster = [p for p in mine if p.player_id != drop_id] + [add]
             changed = set(add.games) | (set(by_id[drop_id].games) if drop_id is not None else set())
-            totals = {d: _day_totals(roster, d, slot_counts) if d in changed else base_days[d] for d in days}
-            p = weekly_cat_p_win(_weekly(totals, weeks), average, categories, dispersion)
+            totals = {d: day_totals(roster, d, slot_counts) if d in changed else base_days[d] for d in days}
+            p = weekly_cat_p_win(weekly_totals(totals, weeks), average, categories, dispersion)
             options.append(
                 HoldOption(
                     add_id=add.player_id,

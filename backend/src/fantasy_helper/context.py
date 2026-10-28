@@ -71,6 +71,15 @@ class LeagueContext:
     def days_left(self) -> list[int]:
         return [sp for sp in self.week.scoring_periods if sp >= self.scoring_period]
 
+    @property
+    def later_weeks(self) -> list[MatchupWeek]:
+        """The matchup weeks after this one, playoffs included: what rest-of-season views cover."""
+        return [w for w in self.calendar.weeks if w.matchup_period > self.matchup_period]
+
+    @property
+    def roster_spots(self) -> int:
+        return sum(count for slot, count in self.slot_counts.items() if slot not in NON_ROSTER_SLOTS)
+
     def actual(self, team_id: int) -> dict[str, float]:
         return self.actuals.get(team_id) or dict.fromkeys(STAT_KEYS, 0.0)
 

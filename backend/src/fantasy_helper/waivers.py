@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from fantasy_helper.analytics.waivers import HoldRanking, StreamRanking, rank_hold, rank_stream
 from fantasy_helper.config import get_settings
-from fantasy_helper.context import NON_ROSTER_SLOTS, LeagueContext, load_context
+from fantasy_helper.context import LeagueContext, load_context
 from fantasy_helper.db import queries as q
 from fantasy_helper.db.session import get_sessionmaker
 from fantasy_helper.domain import Matchup
@@ -54,8 +54,7 @@ def default_drops(ctx: LeagueContext, team_id: int, n: int = N_DROPS) -> list[in
     """My n lowest-priority players, plus None (add without dropping) if a roster spot is open."""
     entries = ctx.team_entries(team_id)
     ranked = sorted((r.player_id for r in entries if r.player_id in ctx.z), key=lambda pid: ctx.z[pid].total)
-    capacity = sum(count for slot, count in ctx.slot_counts.items() if slot not in NON_ROSTER_SLOTS)
-    return ([None] if len(entries) < capacity else []) + ranked[:n]
+    return ([None] if len(entries) < ctx.roster_spots else []) + ranked[:n]
 
 
 def waiver_report(
@@ -101,7 +100,7 @@ def waiver_report(
         dispersion=ctx.dispersion,
     )
 
-    later = [w for w in ctx.calendar.weeks if w.matchup_period > ctx.matchup_period]
+    later = ctx.later_weeks
     hold_days = [d for w in later for d in w.scoring_periods]
     hold = rank_hold(
         ctx.categories,
