@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from fantasy_helper.analytics.actuals import week_actuals
+from fantasy_helper.analytics.trades import MIN_GAIN
 from fantasy_helper.api.app import SnapshotCache, create_app
 from fantasy_helper.config import Settings
 from fantasy_helper.db import models as m
@@ -170,3 +171,48 @@ def test_cache_evicts_the_oldest_entry():
     for key in ["a", "b", "a", "c", "b"]:
         cache.get(key, lambda k=key: calls.append(k) or k)
     assert calls == ["a", "b", "c", "b"]  # "a" was reused, then "b" evicted by "c"
+
+
+def test_profiles_cover_every_team(client):
+    body = client.get("/api/profiles").json()
+    assert body["window"] == "model" and len(body["teams"]) == 10
+    mine = next(t for t in body["teams"] if t["team"]["team_id"] == MY_TEAM)
+    assert mine["profile"] == client.get("/api/team").json()["profile"]  # the Team page's numbers
+    for key in (p["key"] for p in mine["profile"]):
+        ranks = [next(p["rank"] for p in t["profile"] if p["key"] == key) for t in body["teams"]]
+        assert min(ranks) == 1 and max(ranks) <= 10
+    assert client.get("/api/profiles", params={"window": "last_7"}).json()["window"] == "last_7"
+    assert client.get("/api/profiles", params={"window": "career"}).status_code == 400
+
+
+def test_power_ranks_every_team_with_the_all_play_record(client):
+    body = client.get("/api/power").json()
+    rows = body["rows"]
+    assert [r["rank"] for r in rows] == list(range(1, 11)) and body["completed_weeks"] == 2
+    assert [r["strength"] for r in rows] == sorted((r["strength"] for r in rows), reverse=True)
+    assert sum(r["strength"] for r in rows) == pytest.approx(5, abs=0.01)  # every pairing is split between two teams
+    for r in rows:  # two completed weeks, nine opponents each
+        assert r["all_play"]["wins"] + r["all_play"]["losses"] + r["all_play"]["ties"] == 18
+    assert body["first_period"] == 4 and body["notes"]
+
+
+def test_trade_scores_both_sides(client):
+    me = [p["player"]["player_id"] for p in client.get("/api/team").json()["players"] if p["slot"] != "IR"]
+    them = [p["player"]["player_id"] for p in client.get("/api/team", params={"team_id": 7}).json()["players"]]
+    body = client.get("/api/trade", params={"partner_id": 7, "give": me[:2], "get": them[:1]}).json()
+    assert [p["player_id"] for p in body["me"]["sends"]] == me[:2] and len(body["me"]["adds"]) == 1
+    assert [p["player_id"] for p in body["partner"]["sends"]] == them[:1] and len(body["partner"]["drops"]) == 1
+    assert set(body["me"]["cat_d_p_win"]) == {c["key"] for c in client.get("/api/league").json()["categories"]}
+    assert body["first_period"] == 4 and body["assumptions"]
+    bad = client.get("/api/trade", params={"partner_id": 7, "give": them[:1], "get": me[:1]})
+    assert bad.status_code == 400 and "roster" in bad.json()["detail"]
+
+
+def test_trades_lists_deals_good_for_both_teams(client):
+    body = client.get("/api/trades").json()
+    assert body["team_id"] == MY_TEAM and body["candidates"] >= body["evaluated"] > 0 and body["assumptions"]
+    assert body["deals"]
+    for d in body["deals"]:
+        assert d["me"]["team_id"] == MY_TEAM and d["partner"]["team_id"] != MY_TEAM
+        assert min(d["me"]["d_cats_per_week"], d["partner"]["d_cats_per_week"]) >= MIN_GAIN
+    assert client.get("/api/trades", params={"team_id": 99}).status_code == 404

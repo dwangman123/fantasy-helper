@@ -13,17 +13,20 @@ from collections.abc import Callable, Hashable, Iterator
 from typing import Annotated, Any
 
 import uvicorn
-from fastapi import APIRouter, Depends, FastAPI, Request
+from fastapi import APIRouter, Depends, FastAPI, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from fantasy_helper.analytics.actuals import category_values
 from fantasy_helper.analytics.daily_lineup import SLOT_ORDER, team_week
-from fantasy_helper.analytics.team_profile import DEFAULT_PUNT_Z, team_profiles
+from fantasy_helper.analytics.power import all_play_records, power_rankings
+from fantasy_helper.analytics.team_profile import DEFAULT_PUNT_Z, TeamProfile, team_profiles
+from fantasy_helper.analytics.trades import Season, TradeSide
 from fantasy_helper.analytics.waivers import category_board, side_view
 from fantasy_helper.analytics.zscores import SPECIALTY_Z, PlayerZ, player_zscores, specialties
 from fantasy_helper.api import schemas as s
+from fantasy_helper.categories import Category
 from fantasy_helper.config import Settings, get_settings
 from fantasy_helper.context import LeagueContext, load_context
 from fantasy_helper.db import models as m
@@ -32,6 +35,7 @@ from fantasy_helper.db.session import get_sessionmaker
 from fantasy_helper.domain import LiveGame, Player, RosterEntry, StatLine
 from fantasy_helper.ingest.run import run as run_ingest
 from fantasy_helper.predict import WeekPredictions, predict_current_week
+from fantasy_helper.trades import TradeIdeas, TradeReport, season_outlook, trade_ideas, trade_report
 from fantasy_helper.waivers import WaiverReport, waiver_report
 
 CACHE_SIZE = 32
@@ -91,6 +95,10 @@ class Ctx:
         return self.cache.get(
             ("week", self.key), lambda: predict_current_week(self.session, self.season, ctx=self.context())
         )
+
+    def outlook(self) -> Season:
+        """Every team's remaining weeks as rostered now, for trades and power rankings."""
+        return self.cache.get(("outlook", self.key), lambda: season_outlook(self.context()))
 
 
 CtxDep = Annotated[Ctx, Depends()]
@@ -397,16 +405,7 @@ def team(c: CtxDep, team_id: int | None = None, window: str = "model"):
         team=s.TeamOut(**vars(teams[team_id])),
         window=window,
         windows=WINDOWS,
-        profile=[
-            s.CategoryProfile(
-                key=cat.key,
-                value=profile.totals[cat.key],
-                rank=profile.ranks[cat.key],
-                z=profile.league_z[cat.key],
-                punt=cat.key in profile.punts,
-            )
-            for cat in ctx.categories
-        ],
+        profile=_profile_out(ctx.categories, profile),
         punts=profile.punts,
         players=players,
         moves=moves[:MOVES_SHOWN],
@@ -420,6 +419,147 @@ def team(c: CtxDep, team_id: int | None = None, window: str = "model"):
             "Trades show the players this team received and still has; ESPN lists trades without their players "
             "unless signed in.",
         ],
+    )
+
+
+def _profile_out(cats: list[Category], profile: TeamProfile) -> list[s.CategoryProfile]:
+    return [
+        s.CategoryProfile(
+            key=cat.key,
+            value=profile.totals[cat.key],
+            rank=profile.ranks[cat.key],
+            z=profile.league_z[cat.key],
+            punt=cat.key in profile.punts,
+        )
+        for cat in cats
+    ]
+
+
+@router.get("/profiles", response_model=s.ProfilesOut)
+def profiles(c: CtxDep, window: str = "model"):
+    """Every team's category profile over one stat window: the league heatmap."""
+    ctx = c.context()
+    lines, _ = c.cache.get(("window", c.key, window), lambda: _window(c, ctx, window))
+    by_team = team_profiles(ctx.rosters, lines, ctx.categories)
+    return s.ProfilesOut(
+        window=window,
+        windows=WINDOWS,
+        teams=[
+            s.TeamProfileOut(
+                team=s.TeamOut(**vars(t)),
+                profile=_profile_out(ctx.categories, by_team[t.team_id]),
+                punts=by_team[t.team_id].punts,
+            )
+            for t in q.load_teams(c.session, c.season)
+            if t.team_id in by_team
+        ],
+        notes=[
+            "Each cell is the team's per-game value in that category (the sum of its players' averages, IR excluded), "
+            "shaded by how far it sits from the league's teams and ranked 1 to 10.",
+            f"A punt is a category more than {-DEFAULT_PUNT_Z:g} standard deviations below the league's teams.",
+        ],
+    )
+
+
+@router.get("/power", response_model=s.PowerOut)
+def power(c: CtxDep):
+    """Power rankings: rest-of-season strength against every team, with the all-play record so far."""
+    ctx, outlook = c.context(), c.outlook()
+    completed = [mu for p in range(1, ctx.matchup_period) for mu in q.load_matchups(c.session, c.season, p)]
+    rows = power_rankings(ctx.categories, outlook.weekly, ctx.dispersion, all_play_records(completed, ctx.categories))
+    lines, _ = c.cache.get(("window", c.key, "model"), lambda: _window(c, ctx, "model"))
+    punts = {t: p.punts for t, p in team_profiles(ctx.rosters, lines, ctx.categories).items()}
+    teams = {t.team_id: t for t in q.load_teams(c.session, c.season)}
+    later = ctx.later_weeks
+    return s.PowerOut(
+        weeks=len(later),
+        first_period=later[0].matchup_period,
+        completed_weeks=ctx.matchup_period - 1,
+        rows=[
+            s.PowerRow(
+                team=s.TeamOut(**vars(teams[r.team_id])),
+                rank=r.rank,
+                strength=r.strength,
+                cats_per_week=r.cats_per_week,
+                cat_p_win=r.cat_p_win,
+                all_play=s.RecordOut(**vars(r.all_play)),
+                punts=punts.get(r.team_id, []),
+            )
+            for r in rows
+        ],
+        notes=[
+            f"Strength is the expected share of weekly matchups a team would win playing every other team in each of "
+            f"weeks {later[0].matchup_period}-{later[-1].matchup_period} (playoffs included), with rosters as they "
+            "are now and everyone healthy; a tied week counts half.",
+            "Strength counts each team's NBA schedule and the daily lineup cap, so it can disagree with the per-game "
+            "heatmap. Winning a week treats the nine categories as independent.",
+            "All-play so far compares each completed week's totals with every other team's that week, so it doesn't "
+            "depend on who a team happened to play.",
+        ],
+    )
+
+
+def _side_out(ctx: LeagueContext, side: TradeSide) -> s.TradeSideOut:
+    def players(ids: list[int]) -> list[s.PlayerOut]:
+        return [_player(ctx, pid) for pid in ids]
+
+    return s.TradeSideOut(
+        team_id=side.team_id,
+        receives=players(side.receives),
+        sends=players(side.sends),
+        drops=players(side.drops),
+        adds=players(side.adds),
+        cats_per_week=side.cats_per_week,
+        d_cats_per_week=side.d_cats_per_week,
+        p_week=side.p_week,
+        d_p_week=side.d_p_week,
+        cat_p_win=side.cat_p_win,
+        cat_d_p_win=side.cat_d_p_win,
+        cat_d_value=side.cat_d_value,
+    )
+
+
+@router.get("/trade", response_model=s.TradeOut)
+def trade(
+    c: CtxDep,
+    partner_id: int,
+    give: Annotated[list[int], Query()],
+    get: Annotated[list[int], Query()],
+    team_id: int | None = None,
+):
+    """What a deal does for both teams: `give` are my players, `get` the partner's."""
+    team_id = c.settings.my_team_id if team_id is None else team_id
+    ctx = c.context()
+    report: TradeReport = c.cache.get(
+        ("trade", c.key, team_id, partner_id, tuple(sorted(give)), tuple(sorted(get))),
+        lambda: trade_report(ctx, c.outlook(), team_id, partner_id, give, get),
+    )
+    later = ctx.later_weeks
+    return s.TradeOut(
+        me=_side_out(ctx, report.result.me),
+        partner=_side_out(ctx, report.result.partner),
+        weeks=len(later),
+        first_period=later[0].matchup_period,
+        warnings=report.warnings,
+        assumptions=report.assumptions,
+    )
+
+
+@router.get("/trades", response_model=s.TradesOut)
+def trades(c: CtxDep, team_id: int | None = None):
+    """Deals that help both teams, found by searching 1-for-1 and 2-for-1 trades with every other team."""
+    team_id = c.settings.my_team_id if team_id is None else team_id
+    ctx = c.context()
+    ideas: TradeIdeas = c.cache.get(("trades", c.key, team_id), lambda: trade_ideas(ctx, c.outlook(), team_id))
+    later = ctx.later_weeks
+    return s.TradesOut(
+        team_id=team_id,
+        deals=[s.TradeIdea(me=_side_out(ctx, d.me), partner=_side_out(ctx, d.partner)) for d in ideas.search.deals],
+        candidates=ideas.search.candidates,
+        evaluated=ideas.search.evaluated,
+        weeks=len(later),
+        first_period=later[0].matchup_period,
+        assumptions=ideas.assumptions,
     )
 
 

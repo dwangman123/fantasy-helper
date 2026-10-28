@@ -273,3 +273,81 @@ class TeamDetail(BaseModel):
     players: list[TeamPlayer]
     moves: list[MoveOut]  # newest first
     notes: list[str]
+
+
+class TeamProfileOut(BaseModel):
+    team: TeamOut
+    profile: list[CategoryProfile]
+    punts: list[str]
+
+
+class ProfilesOut(BaseModel):
+    """Every team's category profile over one stat window: the league heatmap."""
+
+    window: str
+    windows: list[str]
+    teams: list[TeamProfileOut]
+    notes: list[str]
+
+
+class RecordOut(BaseModel):
+    wins: int
+    losses: int
+    ties: int
+
+
+class PowerRow(BaseModel):
+    team: TeamOut
+    rank: int
+    strength: float  # expected share of weekly matchups won against every other team, rest of season (ties half)
+    cats_per_week: float  # expected categories won per week against the other teams
+    cat_p_win: dict[str, float]
+    all_play: RecordOut  # every completed week against every other team
+    punts: list[str]
+
+
+class PowerOut(BaseModel):
+    weeks: int  # remaining weeks the strength covers
+    first_period: int
+    completed_weeks: int
+    rows: list[PowerRow]  # strongest first
+    notes: list[str]
+
+
+class TradeSideOut(BaseModel):
+    team_id: int
+    receives: list[PlayerOut]
+    sends: list[PlayerOut]
+    drops: list[PlayerOut]  # dropped to make room
+    adds: list[PlayerOut]  # free agents picked up for the spots the deal opens
+    cats_per_week: float  # before the deal, vs a league-average team
+    d_cats_per_week: float
+    p_week: float  # mean P(win a week) vs a league-average team, before the deal
+    d_p_week: float
+    cat_p_win: dict[str, float]
+    cat_d_p_win: dict[str, float]
+    cat_d_value: dict[str, float]  # change in the expected weekly total; percentages: in the percentage
+
+
+class TradeOut(BaseModel):
+    me: TradeSideOut
+    partner: TradeSideOut
+    weeks: int
+    first_period: int
+    warnings: list[str]
+    assumptions: list[str]
+
+
+class TradeIdea(BaseModel):
+    me: TradeSideOut
+    partner: TradeSideOut
+
+
+class TradesOut(BaseModel):
+    team_id: int
+    deals: list[TradeIdea]  # both sides gain; best for me first
+    candidates: int  # deals screened
+    evaluated: int  # deals scored in full
+    weeks: int
+    first_period: int
+    assumptions: list[str]
