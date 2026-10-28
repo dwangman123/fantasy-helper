@@ -10,7 +10,9 @@ import { dateTime } from "@/lib/format";
 const LINKS = [
   { href: "/matchup", label: "Matchup" },
   { href: "/team", label: "Team" },
+  { href: "/league", label: "League" },
   { href: "/waivers", label: "Waivers" },
+  { href: "/trades", label: "Trades" },
 ];
 
 export function TopBar() {

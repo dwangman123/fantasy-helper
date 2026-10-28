@@ -50,3 +50,13 @@ export function totalValue(stats: Stats, key: string, exact: boolean): string {
   if (!parts) return num(stats[key], exact);
   return stats[parts[1]] ? stat(stats[parts[0]] / stats[parts[1]], true) : "–";
 }
+
+// Stat windows the Team and League pages can show; "model" is what predictions use.
+export const WINDOW_LABELS: Record<string, string> = {
+  model: "Model (season + projection)",
+  season: "Season",
+  last_7: "Last 7 days",
+  last_15: "Last 15 days",
+  last_30: "Last 30 days",
+  projected: "Projected",
+};

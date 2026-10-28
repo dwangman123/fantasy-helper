@@ -193,6 +193,54 @@ export type Waivers = {
   n_sims: number;
 };
 
+export type TeamProfile = { team: Team; profile: CategoryProfile[]; punts: string[] };
+
+// Every team's category profile over one stat window: the league heatmap.
+export type Profiles = { window: string; windows: string[]; teams: TeamProfile[]; notes: string[] };
+
+export type WinLoss = { wins: number; losses: number; ties: number };
+
+export type PowerRow = {
+  team: Team;
+  rank: number;
+  strength: number; // expected share of weekly matchups won against every other team, rest of season
+  cats_per_week: number;
+  cat_p_win: Record<string, number>;
+  all_play: WinLoss; // completed weeks, against every other team
+  punts: string[];
+};
+
+export type Power = { weeks: number; first_period: number; completed_weeks: number; rows: PowerRow[]; notes: string[] };
+
+export type TradeSide = {
+  team_id: number;
+  receives: Player[];
+  sends: Player[];
+  drops: Player[]; // dropped to make room
+  adds: Player[]; // free agents picked up for the spots the deal opens
+  cats_per_week: number; // before the deal, vs a league-average team
+  d_cats_per_week: number;
+  p_week: number; // P(win a week) vs a league-average team, before the deal
+  d_p_week: number;
+  cat_p_win: Record<string, number>;
+  cat_d_p_win: Record<string, number>;
+  cat_d_value: Record<string, number>; // change in the expected weekly total; percentages: in the percentage
+};
+
+export type TradeIdea = { me: TradeSide; partner: TradeSide };
+
+export type Trade = TradeIdea & { weeks: number; first_period: number; warnings: string[]; assumptions: string[] };
+
+export type Trades = {
+  team_id: number;
+  deals: TradeIdea[]; // both sides gain; best for me first
+  candidates: number;
+  evaluated: number;
+  weeks: number;
+  first_period: number;
+  assumptions: string[];
+};
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -202,13 +250,14 @@ export class ApiError extends Error {
   }
 }
 
-async function get<T>(
-  path: string,
-  params: Record<string, string | number | boolean | undefined> = {},
-  init?: RequestInit,
-): Promise<T> {
+type Param = string | number | boolean | undefined;
+
+async function get<T>(path: string, params: Record<string, Param | number[]> = {}, init?: RequestInit): Promise<T> {
   const query = new URLSearchParams();
-  for (const [k, v] of Object.entries(params)) if (v !== undefined) query.set(k, String(v));
+  for (const [k, v] of Object.entries(params)) {
+    if (Array.isArray(v)) for (const x of v) query.append(k, String(x));
+    else if (v !== undefined) query.set(k, String(v));
+  }
   const res = await fetch(`/api${path}${query.size ? `?${query}` : ""}`, init);
   if (!res.ok) {
     const body = await res.json().catch(() => null);
@@ -259,6 +308,32 @@ export const useWaivers = (teamId: number | undefined, sameDay: boolean) =>
   useQuery({
     queryKey: ["waivers", teamId, sameDay],
     queryFn: () => get<Waivers>("/waivers", { team_id: teamId, same_day: sameDay }),
+    enabled: teamId !== undefined,
+    placeholderData: keepPreviousData,
+  });
+
+export const useProfiles = (window: string) =>
+  useQuery({
+    queryKey: ["profiles", window],
+    queryFn: () => get<Profiles>("/profiles", { window }),
+    placeholderData: keepPreviousData,
+  });
+
+export const usePower = () => useQuery({ queryKey: ["power"], queryFn: () => get<Power>("/power") });
+
+// A deal from my side: `give` are my players, `receive` the partner's.
+export const useTrade = (teamId: number | undefined, partnerId: number | undefined, give: number[], receive: number[]) =>
+  useQuery({
+    queryKey: ["trade", teamId, partnerId, give, receive],
+    queryFn: () => get<Trade>("/trade", { team_id: teamId, partner_id: partnerId, give, get: receive }),
+    enabled: teamId !== undefined && partnerId !== undefined && give.length > 0 && receive.length > 0,
+    placeholderData: keepPreviousData,
+  });
+
+export const useTrades = (teamId: number | undefined) =>
+  useQuery({
+    queryKey: ["trades", teamId],
+    queryFn: () => get<Trades>("/trades", { team_id: teamId }),
     enabled: teamId !== undefined,
     placeholderData: keepPreviousData,
   });

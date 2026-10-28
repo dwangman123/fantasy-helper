@@ -5,6 +5,7 @@ import { Suspense, useState } from "react";
 import { InjuryBadge } from "@/components/PlayerCell";
 import { ErrorNotice, Loading } from "@/components/Status";
 import { TeamSelect, useTeamParam } from "@/components/TeamSelect";
+import { ZLegend, zClass } from "@/components/ZShade";
 import {
   type Category,
   type CategoryProfile,
@@ -14,16 +15,7 @@ import {
   useLeague,
   useTeam,
 } from "@/lib/api";
-import { PARTS, dayOf, stat } from "@/lib/format";
-
-const WINDOW_LABELS: Record<string, string> = {
-  model: "Model (season + projection)",
-  season: "Season",
-  last_7: "Last 7 days",
-  last_15: "Last 15 days",
-  last_30: "Last 30 days",
-  projected: "Projected",
-};
+import { PARTS, WINDOW_LABELS, dayOf, stat } from "@/lib/format";
 
 export default function TeamPage() {
   return (
@@ -144,39 +136,6 @@ function perGame(stats: Stats, key: string): string {
   const parts = PARTS[key];
   if (!parts) return stats[key].toFixed(1);
   return stats[parts[1]] ? stat(stats[parts[0]] / stats[parts[1]], true) : "–";
-}
-
-// Shade a cell by how far the player is from the average rostered player in that category.
-function zClass(z: number | undefined): string {
-  if (z === undefined) return "";
-  if (z >= 1) return "z-hi2";
-  if (z >= 0.5) return "z-hi1";
-  if (z <= -1) return "z-lo2";
-  if (z <= -0.5) return "z-lo1";
-  return "";
-}
-
-function ZLegend() {
-  return (
-    <div className="legend">
-      <span>
-        <span className="key z-hi2" />
-        well above average
-      </span>
-      <span>
-        <span className="key z-hi1" />
-        above
-      </span>
-      <span>
-        <span className="key z-lo1" />
-        below
-      </span>
-      <span>
-        <span className="key z-lo2" />
-        well below
-      </span>
-    </div>
-  );
 }
 
 type RosterProps = { players: TeamPlayer[]; profile: CategoryProfile[]; categories: Category[] };
