@@ -146,6 +146,19 @@ def league_snapshot(matchup_period: int = 3, day_of_week: int = 3, n_free_agents
         Matchup(100 * matchup_period + i, matchup_period, h, a, "UNDECIDED", "NONE", espn_totals(h), espn_totals(a))
         for i, (h, a) in enumerate(pairs)
     ]
+    # Completed weeks: final totals around a typical week's, from their own random stream.
+    past = np.random.default_rng(seed + 1)
+
+    def final_totals() -> dict[str, float]:
+        totals = {k: float(round(v * 30 * past.uniform(0.8, 1.2))) for k, v in BASE["SF"].items()}
+        totals["FGM"], totals["FTM"] = round(totals["FGA"] * 0.47), round(totals["FTA"] * 0.78)
+        return {**totals, "FG%": totals["FGM"] / totals["FGA"], "FT%": totals["FTM"] / totals["FTA"]}
+
+    matchups += [
+        Matchup(100 * period + i, period, h, a, "HOME", "NONE", final_totals(), final_totals())
+        for period in range(1, matchup_period)
+        for i, (h, a) in enumerate(pairs)
+    ]
     return LeagueSnapshot(
         league_id=1,
         season=SEASON,
