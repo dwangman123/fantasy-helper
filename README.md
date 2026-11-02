@@ -36,7 +36,9 @@ their set slots, and only the rest of each live game is projected (see *Live sco
 The Matchup page is picked by matchup rather than team and shows both teams head to head:
 each category's totals now and projected on either side of its win / tie / loss bar, and the
 lineup one day at a time (box scores, today's live lines with the game clock, projections
-ahead). A Team page shows any team's roster with per-game averages over a chosen stat window,
+ahead). Its odds chart plots both teams' chance to win after each refresh. An earlier week can
+be picked too: ESPN's final totals, who won each category, that week's box scores day by day,
+and how the odds moved during it. A Team page shows any team's roster with per-game averages over a chosen stat window,
 cells shaded by z-score and specialist tags (categories a player is 1+ SD above the rostered
 average in), the team's per-game category totals with league ranks and inferred punts, and its
 recent adds, drops and trades.

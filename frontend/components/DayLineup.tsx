@@ -7,13 +7,18 @@ import { ErrorNotice, Loading } from "@/components/Status";
 import { type Category, type LineupCell, type Player, type Team, type TeamLineup, useLineup } from "@/lib/api";
 import { PARTS, lineValue, num, timeOfDay, totalValue, weekday } from "@/lib/format";
 
-type Props = { categories: Category[]; left: Team; right: Team };
+// ESPN's lineup order: starters first, then bench and IR.
+const SLOT_ORDER = ["PG", "SG", "SF", "PF", "C", "G", "F", "UT", "BE", "IR"];
+const slotRank = (slot: string | null) => (slot && SLOT_ORDER.includes(slot) ? SLOT_ORDER.indexOf(slot) : SLOT_ORDER.length);
+
+// `period` is an earlier week to show; undefined is the current one.
+type Props = { categories: Category[]; left: Team; right: Team; period?: number };
 
 // One day of the matchup at a time: each team's players with a game that day, in the lineup
 // set on ESPN, with box scores for days played, live lines today and projections ahead.
-export function DayLineup({ categories, left, right }: Props) {
-  const leftLineup = useLineup(left.team_id);
-  const rightLineup = useLineup(right.team_id);
+export function DayLineup({ categories, left, right, period }: Props) {
+  const leftLineup = useLineup(left.team_id, period);
+  const rightLineup = useLineup(right.team_id, period);
   const [picked, setPicked] = useState<number | null>(null);
   const [key, setKey] = useState("PTS");
   const days = leftLineup.data?.days ?? rightLineup.data?.days ?? [];
@@ -67,14 +72,29 @@ export function DayLineup({ categories, left, right }: Props) {
         </div>
       )}
       <ul className="assumptions" style={{ marginTop: 16 }}>
-        <li>
-          <strong>Bold</strong>: box score (today: the line so far). Regular: projected (per-game rate × opponent × chance
-          of playing). <s>Struck through</s>: a game on the bench, which doesn&apos;t count.
-        </li>
-        <li>
-          {PARTS[key] ? `${key} shows makes/attempts. ` : ""}The win odds above assume the best lineup from here on, so
-          these totals can differ from the Final column.
-        </li>
+        {period === undefined ? (
+          <>
+            <li>
+              <strong>Bold</strong>: box score (today: the line so far). Regular: projected (per-game rate × opponent ×
+              chance of playing). <s>Struck through</s>: a game on the bench, which doesn&apos;t count.
+            </li>
+            <li>
+              {PARTS[key] ? `${key} shows makes/attempts. ` : ""}The win odds above assume the best lineup from here on,
+              so these totals can differ from the Final column.
+            </li>
+          </>
+        ) : (
+          <>
+            <li>
+              Box scores in the slot each player held that day. <s>Struck through</s>: a game on the bench, which
+              didn&apos;t count. {PARTS[key] ? `${key} shows makes/attempts.` : ""}
+            </li>
+            <li>
+              These are the box scores stored when each day was fetched, so ESPN&apos;s later stat corrections can leave
+              a day&apos;s total a stat or two off. The categories above are ESPN&apos;s final totals.
+            </li>
+          </>
+        )}
       </ul>
     </section>
   );
@@ -91,7 +111,10 @@ type SideProps = {
 
 function DaySide({ team, data, day, isToday, statKey, side }: SideProps) {
   const d = data.days[day];
-  const playing = data.players.filter((p) => p.cells[day]?.slot && p.cells[day].opponent);
+  // In that day's slot order; a stable sort keeps the API's order (priority) within a slot.
+  const playing = data.players
+    .filter((p) => p.cells[day]?.slot && p.cells[day].opponent)
+    .sort((a, b) => slotRank(a.cells[day].slot) - slotRank(b.cells[day].slot));
   const idle = data.players.filter((p) => p.cells[day]?.slot && !p.cells[day].opponent && p.cells[day].slot !== "IR");
   // Today is settled once nothing counted is left to project, e.g. every game is final.
   const settled = (PARTS[statKey] ?? [statKey]).every((k) => Math.abs(d.projected[k] - d.actual[k]) < 1e-9);

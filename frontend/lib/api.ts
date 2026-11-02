@@ -13,6 +13,8 @@ export type IngestRun = {
   warnings: string[];
 };
 
+export type WeekSpan = { matchup_period: number; start: string; end: string };
+
 export type League = {
   season: number;
   name: string;
@@ -20,6 +22,7 @@ export type League = {
   today: string;
   scoring_period: number;
   week: { matchup_period: number; start: string; end: string; days: number; days_left: number };
+  weeks: WeekSpan[]; // the season's weeks so far, the current one last
   categories: Category[];
   teams: Team[];
   data_as_of: string; // when the stored snapshot was fetched
@@ -35,9 +38,12 @@ export type MatchupSummary = {
   p_away: number;
   expected_home: number;
   expected_away: number;
+  final: boolean; // a finished week: the odds are its result, the expected scores its categories won
 };
 
 export type Label = "locked" | "swing" | "lost";
+
+export type Result = "win" | "tie" | "loss";
 
 export type CategoryOdds = Category & {
   now_me: number | null;
@@ -47,7 +53,8 @@ export type CategoryOdds = Category & {
   p_win: number;
   p_tie: number;
   p_loss: number;
-  label: Label;
+  label: Label | null; // null once the week is over
+  result: Result | null; // set once the week is over
 };
 
 export type OddsPoint = { created_at: string; scoring_period: number; p_win: number; p_tie: number; p_loss: number };
@@ -69,6 +76,7 @@ export type MatchupDetail = {
   categories: CategoryOdds[];
   history: OddsPoint[];
   n_sims: number;
+  final: boolean; // a finished week: ESPN's final totals and results, nothing simulated
 };
 
 export type Player = {
@@ -268,21 +276,27 @@ async function get<T>(path: string, params: Record<string, Param | number[]> = {
 
 export const useLeague = () => useQuery({ queryKey: ["league"], queryFn: () => get<League>("/league") });
 
-export const useMatchups = () =>
-  useQuery({ queryKey: ["matchups"], queryFn: () => get<MatchupSummary[]>("/matchups") });
-
-export const useMatchup = (teamId: number | undefined) =>
+// `period` picks an earlier week; undefined is the current one.
+export const useMatchups = (period?: number, enabled = true) =>
   useQuery({
-    queryKey: ["matchup", teamId],
-    queryFn: () => get<MatchupDetail>("/matchup", { team_id: teamId }),
+    queryKey: ["matchups", period],
+    queryFn: () => get<MatchupSummary[]>("/matchups", { period }),
+    enabled,
+    placeholderData: keepPreviousData,
+  });
+
+export const useMatchup = (teamId: number | undefined, period?: number) =>
+  useQuery({
+    queryKey: ["matchup", teamId, period],
+    queryFn: () => get<MatchupDetail>("/matchup", { team_id: teamId, period }),
     enabled: teamId !== undefined,
     placeholderData: keepPreviousData,
   });
 
-export const useLineup = (teamId: number | undefined) =>
+export const useLineup = (teamId: number | undefined, period?: number) =>
   useQuery({
-    queryKey: ["lineup", teamId],
-    queryFn: () => get<TeamLineup>("/lineup", { team_id: teamId }),
+    queryKey: ["lineup", teamId, period],
+    queryFn: () => get<TeamLineup>("/lineup", { team_id: teamId, period }),
     enabled: teamId !== undefined,
     placeholderData: keepPreviousData,
   });
