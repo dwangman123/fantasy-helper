@@ -7,7 +7,7 @@ import numpy as np
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from fantasy_helper.analytics.actuals import week_actuals
+from fantasy_helper.analytics.actuals import category_results, week_actuals
 from fantasy_helper.calendar import load_calendar
 from fantasy_helper.categories import KNOWN_CATEGORIES, categories_from_scoring_items
 from fantasy_helper.db import models as m
@@ -107,12 +107,17 @@ def league_snapshot(matchup_period: int = 3, day_of_week: int = 3, n_free_agents
         stats = {k: float(round(v * share)) for k, v in projected[r.player_id].items()}
         return PlayerGameStat(r.player_id, day, pro_team[r.player_id], 30.0 * share, stats, r.team_id, r.lineup_slot)
 
-    game_stats = [
-        box(r, day, 0.8)
-        for day in range(week.first_scoring_period, today)
-        for r in rosters
-        if r.lineup_slot != "IR" and (pro_team[r.player_id], day) in playing
-    ]
+    def boxes(days) -> list[PlayerGameStat]:
+        return [
+            box(r, day, 0.8)
+            for day in days
+            for r in rosters
+            if r.lineup_slot != "IR" and (pro_team[r.player_id], day) in playing
+        ]
+
+    game_stats = boxes(range(week.first_scoring_period, today))
+    # Last week's, all stored as history.
+    last_week = boxes(calendar.week(matchup_period - 1).scoring_periods) if matchup_period > 1 else []
     # Today: a third of the NBA teams playing are final, a third live (3rd quarter, 6:00 left), the rest to come.
     teams_today = sorted(g.pro_team for g in pro_games if g.scoring_period == today)
     third = len(teams_today) // 3
@@ -128,8 +133,8 @@ def league_snapshot(matchup_period: int = 3, day_of_week: int = 3, n_free_agents
     ]
 
     # ESPN's matchup totals, which match the completed days' started box scores.
-    def espn_totals(team_id: int) -> dict[str, float]:
-        totals = week_actuals(game_stats).get(team_id, {})
+    def espn_totals(team_id: int, games: list[PlayerGameStat] = game_stats) -> dict[str, float]:
+        totals = week_actuals(games).get(team_id, {})
         return {**totals, "FG%": totals["FGM"] / totals["FGA"], "FT%": totals["FTM"] / totals["FTA"]} if totals else {}
 
     # My team traded for its first player, then swapped a free agent in for its last bench player.
@@ -146,16 +151,30 @@ def league_snapshot(matchup_period: int = 3, day_of_week: int = 3, n_free_agents
         Matchup(100 * matchup_period + i, matchup_period, h, a, "UNDECIDED", "NONE", espn_totals(h), espn_totals(a))
         for i, (h, a) in enumerate(pairs)
     ]
-    # Completed weeks: final totals around a typical week's, from their own random stream.
+    # Completed weeks: last week's totals from its box scores; earlier weeks' around a typical
+    # week's, from their own random stream. Each winner follows the categories, as on ESPN.
     past = np.random.default_rng(seed + 1)
+    categories = categories_from_scoring_items(
+        [{"statId": c.espn_stat_id, "isReverseItem": c.reverse} for c in KNOWN_CATEGORIES.values()]
+    )
 
     def final_totals() -> dict[str, float]:
         totals = {k: float(round(v * 30 * past.uniform(0.8, 1.2))) for k, v in BASE["SF"].items()}
         totals["FGM"], totals["FTM"] = round(totals["FGA"] * 0.47), round(totals["FTA"] * 0.78)
         return {**totals, "FG%": totals["FGM"] / totals["FGA"], "FT%": totals["FTM"] / totals["FTA"]}
 
+    def finished(espn_id: int, period: int, h: int, a: int) -> Matchup:
+        if period == matchup_period - 1:
+            home, away = espn_totals(h, last_week), espn_totals(a, last_week)
+        else:
+            home, away = final_totals(), final_totals()
+        results = list(category_results(home, away, categories).values())
+        won, lost = results.count("win"), results.count("loss")
+        winner = "HOME" if won > lost else "AWAY" if lost > won else "TIE"
+        return Matchup(espn_id, period, h, a, winner, "NONE", home, away)
+
     matchups += [
-        Matchup(100 * period + i, period, h, a, "HOME", "NONE", final_totals(), final_totals())
+        finished(100 * period + i, period, h, a)
         for period in range(1, matchup_period)
         for i, (h, a) in enumerate(pairs)
     ]
@@ -163,9 +182,7 @@ def league_snapshot(matchup_period: int = 3, day_of_week: int = 3, n_free_agents
         league_id=1,
         season=SEASON,
         name="Synthetic League",
-        categories=categories_from_scoring_items(
-            [{"statId": c.espn_stat_id, "isReverseItem": c.reverse} for c in KNOWN_CATEGORIES.values()]
-        ),
+        categories=categories,
         current_matchup_period=matchup_period,
         current_scoring_period=today,
         teams=[Team(t, f"Team {t}", f"T{t}", 1, 1, 0) for t in range(1, 11)],
@@ -185,7 +202,7 @@ def league_snapshot(matchup_period: int = 3, day_of_week: int = 3, n_free_agents
             if day >= today
             for r in rosters
         ],
-        game_stats=game_stats,
+        game_stats=last_week + game_stats,
         live_stats=live_stats,
         live_games=live_games,
         moves=moves,

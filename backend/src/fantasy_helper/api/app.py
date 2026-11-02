@@ -18,7 +18,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from fantasy_helper.analytics.actuals import category_values
+from fantasy_helper.analytics.actuals import category_results, category_values
 from fantasy_helper.analytics.daily_lineup import SLOT_ORDER, team_week
 from fantasy_helper.analytics.power import all_play_records, power_rankings
 from fantasy_helper.analytics.team_profile import DEFAULT_PUNT_Z, TeamProfile, team_profiles
@@ -136,6 +136,11 @@ def league(c: CtxDep):
             days=ctx.week.days,
             days_left=len(ctx.days_left),
         ),
+        weeks=[
+            s.WeekSpan(matchup_period=w.matchup_period, start=w.start, end=w.end)
+            for w in ctx.calendar.weeks
+            if w.matchup_period <= ctx.matchup_period
+        ],
         categories=[s.CategoryOut(key=x.key, is_percentage=x.is_percentage, reverse=x.reverse) for x in ctx.categories],
         teams=[s.TeamOut(**vars(t)) for t in q.load_teams(c.session, c.season)],
         data_as_of=c.league.updated_at,
@@ -143,8 +148,50 @@ def league(c: CtxDep):
     )
 
 
+def _past_period(ctx: LeagueContext, period: int | None) -> int | None:
+    """An earlier week's matchup period, or None for the current week."""
+    if period is None or period == ctx.matchup_period:
+        return None
+    if not 1 <= period < ctx.matchup_period:
+        raise ValueError(f"Week {period} isn't played yet; weeks so far are 1-{ctx.matchup_period}")
+    return period
+
+
+def _score(results: dict[str, str]) -> tuple[int, int, int]:
+    """Categories won, lost and tied."""
+    counts = [list(results.values()).count(r) for r in ("win", "loss", "tie")]
+    return counts[0], counts[1], counts[2]
+
+
+def _outcome(won: int, lost: int) -> tuple[float, float, float]:
+    """A finished week as odds: P(win), P(tie), P(loss) of 1 or 0."""
+    return float(won > lost), float(won == lost), float(won < lost)
+
+
 @router.get("/matchups", response_model=list[s.MatchupSummary])
-def matchups(c: CtxDep):
+def matchups(c: CtxDep, period: int | None = None):
+    ctx = c.context()
+    if (past := _past_period(ctx, period)) is not None:
+        rows = []
+        for mu in q.load_matchups(c.session, c.season, past):
+            if mu.away_team_id is None:
+                continue
+            home, away, _ = _score(category_results(mu.home_cats, mu.away_cats, ctx.categories))
+            p_home, p_tie, p_away = _outcome(home, away)
+            rows.append(
+                s.MatchupSummary(
+                    espn_id=mu.espn_id,
+                    home_team_id=mu.home_team_id,
+                    away_team_id=mu.away_team_id,
+                    p_home=p_home,
+                    p_tie=p_tie,
+                    p_away=p_away,
+                    expected_home=home,
+                    expected_away=away,
+                    final=True,
+                )
+            )
+        return rows
     return [
         s.MatchupSummary(
             espn_id=mu.espn_id,
@@ -160,10 +207,32 @@ def matchups(c: CtxDep):
     ]
 
 
+def _history(c: Ctx, espn_id: int, side: str) -> list[s.OddsPoint]:
+    """The odds stored by each ingest for one matchup, from one side, oldest first."""
+    rows = c.session.scalars(
+        select(m.MatchupPrediction)
+        .where(m.MatchupPrediction.season == c.season, m.MatchupPrediction.espn_id == espn_id)
+        .order_by(m.MatchupPrediction.id)
+    )
+    return [
+        s.OddsPoint(
+            created_at=r.created_at,
+            scoring_period=r.scoring_period,
+            p_win=r.p_home if side == "home" else r.p_away,
+            p_tie=r.p_tie,
+            p_loss=r.p_away if side == "home" else r.p_home,
+        )
+        for r in rows
+    ]
+
+
 @router.get("/matchup", response_model=s.MatchupDetail)
-def matchup(c: CtxDep, team_id: int | None = None):
+def matchup(c: CtxDep, team_id: int | None = None, period: int | None = None):
     team_id = c.settings.my_team_id if team_id is None else team_id
-    ctx, week = c.context(), c.week()
+    ctx = c.context()
+    if (past := _past_period(ctx, period)) is not None:
+        return _final_matchup(c, ctx, team_id, past)
+    week = c.week()
     found = [(mu, p) for mu, p in week.results if team_id in (mu.home_team_id, mu.away_team_id)]
     if not found:
         raise LookupError(f"Team {team_id} has no opponent in matchup period {week.matchup_period}")
@@ -175,21 +244,7 @@ def matchup(c: CtxDep, team_id: int | None = None):
         "home": category_values(ctx.actual(mu.home_team_id), ctx.categories),
         "away": category_values(ctx.actual(mu.away_team_id), ctx.categories),
     }
-    rows = c.session.scalars(
-        select(m.MatchupPrediction)
-        .where(m.MatchupPrediction.season == c.season, m.MatchupPrediction.espn_id == mu.espn_id)
-        .order_by(m.MatchupPrediction.id)
-    )
-    history = [
-        s.OddsPoint(
-            created_at=r.created_at,
-            scoring_period=r.scoring_period,
-            p_win=r.p_home if side == "home" else r.p_away,
-            p_tie=r.p_tie,
-            p_loss=r.p_away if side == "home" else r.p_home,
-        )
-        for r in rows
-    ]
+    history = _history(c, mu.espn_id, side)
     hw, aw, ties = pred.most_likely_score
     likely = {"home": hw, "away": aw}
     return s.MatchupDetail(
@@ -229,6 +284,59 @@ def matchup(c: CtxDep, team_id: int | None = None):
     )
 
 
+def _final_matchup(c: Ctx, ctx: LeagueContext, team_id: int, period: int) -> s.MatchupDetail:
+    """A finished week from one side: ESPN's final totals and each category's result."""
+    found = [
+        mu
+        for mu in q.load_matchups(c.session, c.season, period)
+        if mu.away_team_id is not None and team_id in (mu.home_team_id, mu.away_team_id)
+    ]
+    if not found:
+        raise LookupError(f"Team {team_id} has no opponent in matchup period {period}")
+    mu = found[0]
+    side = "home" if mu.home_team_id == team_id else "away"
+    mine, theirs = (mu.home_cats, mu.away_cats) if side == "home" else (mu.away_cats, mu.home_cats)
+    results = category_results(mine, theirs, ctx.categories)
+    won, lost, tied = _score(results)
+    p_win, p_tie, p_loss = _outcome(won, lost)
+    score = s.Score(me=won, opp=lost, ties=tied)
+    return s.MatchupDetail(
+        espn_id=mu.espn_id,
+        matchup_period=period,
+        team_id=team_id,
+        opponent_id=mu.away_team_id if side == "home" else mu.home_team_id,
+        week_days=[ctx.calendar.date_for(d) for d in ctx.calendar.week(period).scoring_periods],
+        days_left=[],
+        p_win=p_win,
+        p_tie=p_tie,
+        p_loss=p_loss,
+        expected=score,
+        most_likely=score,
+        starts_left_me=0.0,
+        starts_left_opp=0.0,
+        categories=[
+            s.CategoryOdds(
+                key=cat.key,
+                is_percentage=cat.is_percentage,
+                reverse=cat.reverse,
+                now_me=mine.get(cat.key),
+                now_opp=theirs.get(cat.key),
+                proj_me=mine.get(cat.key, 0.0),
+                proj_opp=theirs.get(cat.key, 0.0),
+                p_win=float(results[cat.key] == "win"),
+                p_tie=float(results[cat.key] == "tie"),
+                p_loss=float(results[cat.key] == "loss"),
+                label=None,
+                result=results[cat.key],
+            )
+            for cat in ctx.categories
+        ],
+        history=_history(c, mu.espn_id, side),
+        n_sims=0,
+        final=True,
+    )
+
+
 def _player(ctx: LeagueContext, pid: int | None, players: dict[int, Player] | None = None) -> s.PlayerOut | None:
     """`players` overrides ctx.players, e.g. for someone dropped earlier in the week."""
     if pid is None:
@@ -246,20 +354,27 @@ def _player(ctx: LeagueContext, pid: int | None, players: dict[int, Player] | No
 
 
 @router.get("/lineup", response_model=s.TeamLineup)
-def lineup(c: CtxDep, team_id: int | None = None):
+def lineup(c: CtxDep, team_id: int | None = None, period: int | None = None):
     """One team's week by player and day: box scores for days played, then projections
-    that follow the lineup set on ESPN (not the simulation's best lineup)."""
+    that follow the lineup set on ESPN (not the simulation's best lineup). An earlier
+    week (`period`) is box scores only."""
     team_id = c.settings.my_team_id if team_id is None else team_id
     ctx = c.context()
     if not any(r.team_id == team_id for r in ctx.rosters):
         raise LookupError(f"No team {team_id} in season {c.season}")
-    days = list(ctx.week.scoring_periods)
+    period = _past_period(ctx, period) or ctx.matchup_period
+    days = list(ctx.calendar.week(period).scoring_periods)
     slots = {(d.player_id, d.scoring_period): d.lineup_slot for d in q.load_daily_lineups(c.session, c.season, team_id)}
     played_days = [d for d in days if d < ctx.scoring_period]
     played = q.load_game_stats(c.session, c.season, team_id=team_id, scoring_periods=played_days)
     ids = {pid for pid, _ in slots} | {g.player_id for g in played}
     players = ctx.players | q.load_players(c.session, ids - ctx.players.keys())
     schedule = q.load_schedule(c.session, c.season, days)
+    # His NBA team's opponents; on days played, those of the team he played for then.
+    opponents = {pid: dict(schedule.get(players[pid].pro_team, {})) for pid in ids if pid in players}
+    for g in played:
+        if g.player_id in opponents and (opp := schedule.get(g.pro_team or "", {}).get(g.scoring_period)):
+            opponents[g.player_id][g.scoring_period] = opp
     week = team_week(
         days,
         ctx.scoring_period,
@@ -267,7 +382,7 @@ def lineup(c: CtxDep, team_id: int | None = None):
         slots,
         [g for g in played if g.player_id in players],
         {pid: ctx.sim_player(pid, ctx.days_left) for pid in ids if pid in ctx.rates and pid in ctx.players},
-        {pid: schedule.get(players[pid].pro_team, {}) for pid in ids if pid in players},
+        opponents,
         live={pid: g for pid, g in ctx.live_stats.items() if pid in ids},
         games_today={
             pid: ctx.live_games[players[pid].pro_team]
@@ -277,7 +392,7 @@ def lineup(c: CtxDep, team_id: int | None = None):
     )
     return s.TeamLineup(
         team_id=team_id,
-        matchup_period=ctx.matchup_period,
+        matchup_period=period,
         days=[
             s.LineupDay(
                 day=ctx.calendar.date_for(day),

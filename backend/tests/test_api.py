@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from itertools import pairwise
 
 import pytest
 from fastapi.testclient import TestClient
@@ -9,6 +10,7 @@ from sqlalchemy.pool import StaticPool
 from fantasy_helper.analytics.actuals import week_actuals
 from fantasy_helper.analytics.trades import MIN_GAIN
 from fantasy_helper.api.app import SnapshotCache, create_app
+from fantasy_helper.calendar import load_calendar
 from fantasy_helper.config import Settings
 from fantasy_helper.db import models as m
 from fantasy_helper.ingest.store import store_snapshot
@@ -53,12 +55,64 @@ def test_matchup_is_from_my_side_with_history(client):
 
 def test_matchup_now_is_started_box_scores_plus_todays_lines(client):
     snap = league_snapshot()
-    totals = week_actuals([*snap.game_stats, *snap.live_stats])[MY_TEAM]
-    completed = week_actuals(snap.game_stats)[MY_TEAM]
+    week = load_calendar(SEASON).week(snap.current_matchup_period)
+    this_week = [g for g in snap.game_stats if g.scoring_period in week.scoring_periods]
+    totals = week_actuals([*this_week, *snap.live_stats])[MY_TEAM]
+    completed = week_actuals(this_week)[MY_TEAM]
     cats = {c["key"]: c for c in client.get("/api/matchup").json()["categories"]}
     assert cats["PTS"]["now_me"] == totals["PTS"] > completed["PTS"]  # today's lines so far are in
     assert cats["FG%"]["now_me"] == pytest.approx(totals["FGM"] / totals["FGA"])
     assert cats["FT%"]["now_opp"] is not None
+
+
+def test_league_lists_the_weeks_so_far(client):
+    weeks = client.get("/api/league").json()["weeks"]
+    assert [w["matchup_period"] for w in weeks] == [1, 2, 3]
+    assert all(a["end"] < b["start"] for a, b in pairwise(weeks))
+
+
+def test_a_finished_week_is_espn_totals_and_each_categorys_result(client):
+    mu = next(x for x in league_snapshot().matchups if x.matchup_period == 2 and x.home_team_id == MY_TEAM)
+    body = client.get("/api/matchup", params={"period": 2}).json()
+    assert body["final"] and body["matchup_period"] == 2 and body["opponent_id"] == mu.away_team_id
+    assert body["n_sims"] == 0 and body["days_left"] == [] and len(body["week_days"]) == 7
+    cats = {c["key"]: c for c in body["categories"]}
+    assert cats["PTS"]["now_me"] == cats["PTS"]["proj_me"] == mu.home_cats["PTS"]
+    assert cats["FG%"]["now_opp"] == pytest.approx(mu.away_cats["FG%"])
+    assert all(c["label"] is None for c in cats.values())
+    fewer_turnovers = cats["TO"]["now_me"] < cats["TO"]["now_opp"]
+    assert cats["TO"]["result"] == ("win" if fewer_turnovers else "loss")  # reversed: fewer wins
+    results = [c["result"] for c in cats.values()]
+    assert (body["expected"]["me"], body["expected"]["opp"]) == (results.count("win"), results.count("loss"))
+    assert body["p_win"] == (1.0 if mu.winner == "HOME" else 0.0)
+    other = client.get("/api/matchup", params={"team_id": mu.away_team_id, "period": 2}).json()
+    assert other["p_win"] == body["p_loss"] and other["expected"]["me"] == body["expected"]["opp"]
+
+
+def test_finished_weeks_list_every_matchups_result(client):
+    body = client.get("/api/matchups", params={"period": 1}).json()
+    assert len(body) == 5 and all(x["final"] for x in body)
+    assert all(x["p_home"] + x["p_tie"] + x["p_away"] == 1 for x in body)
+    assert all(x["expected_home"] + x["expected_away"] <= 9 for x in body)
+
+
+def test_a_finished_weeks_lineup_is_its_box_scores(client):
+    week = load_calendar(SEASON).week(2)
+    games = [g for g in league_snapshot().game_stats if g.scoring_period in week.scoring_periods]
+    body = client.get("/api/lineup", params={"period": 2}).json()
+    assert body["matchup_period"] == 2 and len(body["days"]) == 7 and all(d["played"] for d in body["days"])
+    started = week_actuals(games)[MY_TEAM]
+    assert sum(d["actual"]["PTS"] for d in body["days"]) == pytest.approx(started["PTS"])
+    for p in body["players"]:
+        for cell in p["cells"]:
+            assert cell["actual"] and cell["game"] is None and (not cell["slot"] or cell["opponent"])
+
+
+def test_weeks_not_played_yet_are_rejected(client):
+    for path in ("/api/matchups", "/api/matchup", "/api/lineup"):
+        assert client.get(path, params={"period": 4}).status_code == 400
+        assert client.get(path, params={"period": 0}).status_code == 400
+    assert client.get("/api/matchup", params={"period": 3}).json()["final"] is False  # this week is live
 
 
 def test_timestamps_are_sent_as_utc(client):

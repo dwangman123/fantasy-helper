@@ -39,6 +39,17 @@ def category_values(totals: dict[str, float], categories: list[Category]) -> dic
     return out
 
 
+def category_results(mine: dict[str, float], theirs: dict[str, float], categories: list[Category]) -> dict[str, str]:
+    """A finished week's categories from one side: win, tie or loss (fewer wins a reversed
+    category), compared at full precision. Over weeks 1-2 of 2026 this matched ESPN's own
+    result in all 90 matchup categories."""
+    out = {}
+    for cat in categories:
+        a, b = mine.get(cat.key, 0.0), theirs.get(cat.key, 0.0)
+        out[cat.key] = "tie" if a == b else "win" if (a < b) == cat.reverse else "loss"
+    return out
+
+
 def espn_mismatches(matchups: list[Matchup], completed: list[PlayerGameStat], live: list[PlayerGameStat]) -> list[str]:
     """Teams whose ESPN matchup totals equal neither our completed days nor completed
     days plus today so far. Skipped while ESPN shows nothing yet (a week's first day)."""

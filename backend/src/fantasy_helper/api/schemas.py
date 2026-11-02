@@ -47,6 +47,12 @@ class WeekOut(BaseModel):
     days_left: int
 
 
+class WeekSpan(BaseModel):
+    matchup_period: int
+    start: date
+    end: date
+
+
 class LeagueOut(BaseModel):
     season: int
     name: str
@@ -54,6 +60,7 @@ class LeagueOut(BaseModel):
     today: date
     scoring_period: int
     week: WeekOut
+    weeks: list[WeekSpan]  # the season's weeks so far, the current one last
     categories: list[CategoryOut]
     teams: list[TeamOut]
     data_as_of: UtcDatetime  # when the stored snapshot was fetched; a failed ingest leaves it as is
@@ -69,6 +76,7 @@ class MatchupSummary(BaseModel):
     p_away: float
     expected_home: float
     expected_away: float
+    final: bool = False  # a finished week: the odds are its result, the expected scores its categories won
 
 
 class Score(BaseModel):
@@ -88,7 +96,8 @@ class CategoryOdds(BaseModel):
     p_win: float
     p_tie: float
     p_loss: float
-    label: str  # locked / swing / lost
+    label: str | None  # locked / swing / lost; None once the week is over
+    result: str | None = None  # win / tie / loss once the week is over
 
 
 class OddsPoint(BaseModel):
@@ -114,8 +123,11 @@ class MatchupDetail(BaseModel):
     starts_left_me: float
     starts_left_opp: float
     categories: list[CategoryOdds]
-    history: list[OddsPoint]  # stored predictions from each ingest this week, oldest first
+    history: list[OddsPoint]  # stored predictions from each ingest that week, oldest first
     n_sims: int
+    # A finished week: ESPN's final totals, each category's result, and odds of 1 or 0
+    # for the outcome; nothing is simulated (n_sims 0).
+    final: bool = False
 
 
 class PlayerOut(BaseModel):
