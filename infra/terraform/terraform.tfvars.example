@@ -1,0 +1,4 @@
+# Copy to terraform.tfvars (gitignored) and fill in.
+alert_email = "you@example.com"
+# monthly_budget_usd       = 5
+# api_reserved_concurrency = 5   # only if your Lambda concurrency quota is above 10

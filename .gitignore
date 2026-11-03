@@ -15,3 +15,10 @@ node_modules/
 .next/
 
 .DS_Store
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+crash.log

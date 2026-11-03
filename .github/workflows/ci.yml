@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: fantasy
+          POSTGRES_PASSWORD: fantasy
+          POSTGRES_DB: fantasy
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U fantasy"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      POSTGRES_URL: postgresql://fantasy:fantasy@localhost:5432/fantasy
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          version: "0.12.0"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - run: uv sync --frozen --extra aws
+      - name: Lint
+        run: uv run ruff check . && uv run ruff format --check .
+      - name: Migrations build the models' schema on Postgres
+        env:
+          FH_DATABASE_URL: ${{ env.POSTGRES_URL }}
+        run: uv run alembic upgrade head && uv run alembic check
+      - name: Tests (SQLite, plus tests/test_postgres.py on Postgres)
+        env:
+          FH_TEST_POSTGRES_URL: ${{ env.POSTGRES_URL }}
+        run: uv run pytest
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+
+  terraform:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.16.5
+      - run: terraform fmt -check -recursive
+      - name: Validate both stacks
+        run: |
+          for dir in bootstrap .; do
+            terraform -chdir="$dir" init -backend=false -input=false
+            terraform -chdir="$dir" validate
+          done
+
+  image:
+    # Builds the Lambda image and answers one request through the base image's runtime emulator.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: backend
+          platforms: linux/amd64
+          provenance: false
+          load: true
+          tags: fantasy-helper:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke test /api/health
+        run: |
+          docker run -d --name api -p 9000:8080 fantasy-helper:ci
+          event='{"version": "2.0", "routeKey": "$default", "rawPath": "/api/health", "rawQueryString": "",
+            "headers": {"host": "localhost"}, "isBase64Encoded": false,
+            "requestContext": {"http": {"method": "GET", "path": "/api/health", "protocol": "HTTP/1.1",
+              "sourceIp": "127.0.0.1", "userAgent": "ci"}, "requestId": "ci", "routeKey": "$default",
+              "stage": "$default", "domainName": "localhost", "accountId": "anonymous", "apiId": "ci",
+              "time": "01/Jan/2026:00:00:00 +0000", "timeEpoch": 0}}'
+          for i in $(seq 1 10); do
+            response=$(curl -s -XPOST localhost:9000/2015-03-31/functions/function/invocations -d "$event") && break
+            sleep 1
+          done
+          echo "$response"
+          docker logs api
+          echo "$response" | grep -q '"statusCode": 200'
