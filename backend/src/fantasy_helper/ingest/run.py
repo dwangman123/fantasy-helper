@@ -2,8 +2,11 @@
 
 import logging
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
 from fantasy_helper.analytics.actuals import espn_mismatches
@@ -18,12 +21,41 @@ from fantasy_helper.predict import predict_current_week, store_predictions
 
 log = logging.getLogger("fantasy_helper.ingest")
 
+LOCK_KEY = 0x46480001  # any constant: names this job's advisory lock in the database
+
+
+class IngestBusy(RuntimeError):
+    """Another ingest is already running against the same database."""
+
+
+@contextmanager
+def exclusive(Session: sessionmaker) -> Iterator[None]:
+    """Hold a Postgres advisory lock for the run, so the scheduled ingest and a refresh in another
+    process never overlap. SQLite has no such lock; locally the API's own lock is enough."""
+    engine = Session.kw["bind"]
+    if engine.dialect.name != "postgresql":
+        yield
+        return
+    with engine.connect() as conn:
+        if not conn.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": LOCK_KEY}).scalar():
+            raise IngestBusy("Another ingest is already running")
+        conn.commit()  # the lock belongs to the session, so don't sit idle in a transaction
+        try:
+            yield
+        finally:
+            conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": LOCK_KEY})
+
 
 def run(settings: Settings | None = None, session_factory: sessionmaker | None = None) -> m.IngestRun:
-    """Also run by the API's refresh endpoint, which passes its own settings and sessions."""
+    """Also run by the API's refresh endpoint, which passes its own settings and sessions.
+    Raises IngestBusy, before recording a run, if another ingest holds the database."""
     settings = settings or get_settings()
     Session = session_factory or get_sessionmaker()
+    with exclusive(Session):
+        return _run(settings, Session)
 
+
+def _run(settings: Settings, Session: sessionmaker) -> m.IngestRun:
     with Session.begin() as session:
         run_row = m.IngestRun(season=settings.season, started_at=datetime.now(UTC), status="running")
         session.add(run_row)
@@ -84,6 +116,9 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     try:
         run()
+    except IngestBusy as exc:
+        log.warning("%s; not starting another", exc)
+        sys.exit(1)
     except Exception:
         sys.exit(1)
 

@@ -10,6 +10,7 @@ import argparse
 import threading
 from collections import OrderedDict
 from collections.abc import Callable, Hashable, Iterator
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
 import uvicorn
@@ -33,6 +34,7 @@ from fantasy_helper.db import models as m
 from fantasy_helper.db import queries as q
 from fantasy_helper.db.session import get_sessionmaker
 from fantasy_helper.domain import LiveGame, Player, RosterEntry, StatLine
+from fantasy_helper.ingest.run import IngestBusy
 from fantasy_helper.ingest.run import run as run_ingest
 from fantasy_helper.predict import WeekPredictions, predict_current_week
 from fantasy_helper.trades import TradeIdeas, TradeReport, season_outlook, trade_ideas, trade_report
@@ -678,15 +680,38 @@ def trades(c: CtxDep, team_id: int | None = None):
     )
 
 
+def _recent_ingest(state: Any) -> m.IngestRun | None:
+    """The last successful ingest, if it finished within the refresh cooldown."""
+    cooldown = state.settings.refresh_cooldown_seconds
+    if cooldown <= 0:
+        return None
+    with state.sessionmaker() as session:
+        run = session.scalars(
+            select(m.IngestRun)
+            .where(m.IngestRun.season == state.settings.season, m.IngestRun.status == "success")
+            .order_by(m.IngestRun.id.desc())
+            .limit(1)
+        ).first()
+    if run is None or run.finished_at is None:
+        return None
+    finished = run.finished_at if run.finished_at.tzinfo else run.finished_at.replace(tzinfo=UTC)  # SQLite: naive UTC
+    return run if datetime.now(UTC) - finished < timedelta(seconds=cooldown) else None
+
+
 @router.post("/refresh", response_model=s.IngestOut)
 def refresh(request: Request):
     """Pull a fresh snapshot from ESPN now: the same job as `fh-ingest`, one at a time.
-    Cached results are keyed by the snapshot, so the next reads recompute."""
+    Cached results are keyed by the snapshot, so the next reads recompute. Within the
+    cooldown after a successful ingest, that run is returned instead of fetching again."""
     state = request.app.state
+    if recent := _recent_ingest(state):
+        return _ingest_out(recent)
     if not state.refresh_lock.acquire(blocking=False):
         return JSONResponse(status_code=409, content={"detail": "A refresh is already running"})
     try:
         run_id = run_ingest(state.settings, state.sessionmaker).id
+    except IngestBusy:  # the scheduled ingest, or a refresh in another process
+        return JSONResponse(status_code=409, content={"detail": "A refresh is already running"})
     except Exception as exc:  # the run row records the failure; the client just needs the reason
         return JSONResponse(status_code=502, content={"detail": f"Refresh from ESPN failed: {exc}"})
     finally:

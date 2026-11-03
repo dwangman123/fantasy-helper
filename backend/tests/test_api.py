@@ -13,6 +13,7 @@ from fantasy_helper.api.app import SnapshotCache, create_app
 from fantasy_helper.calendar import load_calendar
 from fantasy_helper.config import Settings
 from fantasy_helper.db import models as m
+from fantasy_helper.ingest.run import IngestBusy
 from fantasy_helper.ingest.store import store_snapshot
 from fantasy_helper.predict import predict_current_week, store_predictions
 from tests.league_fixture import MY_TEAM, SEASON, league_snapshot
@@ -188,11 +189,11 @@ def test_unknown_team_is_404(client):
     assert client.get("/api/matchup", params={"team_id": 99}).status_code == 404
 
 
-def refresh_client(monkeypatch, fetch):
+def refresh_client(monkeypatch, fetch, **settings_kw):
     engine = create_engine("sqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False})
     m.Base.metadata.create_all(engine)
     monkeypatch.setattr("fantasy_helper.ingest.run.fetch_snapshot", fetch)
-    settings = Settings(season=SEASON, my_team_id=MY_TEAM, database_url="sqlite://")
+    settings = Settings(season=SEASON, my_team_id=MY_TEAM, database_url="sqlite://", **settings_kw)
     return TestClient(create_app(sessionmaker(bind=engine, expire_on_commit=False), settings))
 
 
@@ -204,6 +205,27 @@ def test_refresh_runs_the_ingest_one_at_a_time(monkeypatch):
         lock = c.app.state.refresh_lock
         with lock:
             assert c.post("/api/refresh").status_code == 409
+
+
+def test_refresh_returns_the_last_run_within_the_cooldown(monkeypatch):
+    fetches = []
+    with refresh_client(
+        monkeypatch, lambda settings, *args: fetches.append(1) or league_snapshot(), refresh_cooldown_seconds=60
+    ) as c:
+        first = c.post("/api/refresh").json()
+        assert c.post("/api/refresh").json()["id"] == first["id"] and len(fetches) == 1
+        with Session(c.app.state.sessionmaker.kw["bind"]) as s, s.begin():  # an hour later
+            s.get(m.IngestRun, first["id"]).finished_at -= timedelta(hours=1)
+        assert c.post("/api/refresh").json()["id"] != first["id"] and len(fetches) == 2
+
+
+def test_refresh_is_busy_while_another_process_ingests(monkeypatch):
+    def busy(*args):
+        raise IngestBusy("Another ingest is already running")
+
+    with refresh_client(monkeypatch, lambda settings, *args: league_snapshot()) as c:
+        monkeypatch.setattr("fantasy_helper.api.app.run_ingest", busy)
+        assert c.post("/api/refresh").status_code == 409
 
 
 def test_failed_refresh_reports_why_and_keeps_the_data(monkeypatch):

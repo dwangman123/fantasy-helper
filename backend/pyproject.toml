@@ -24,6 +24,13 @@ fh-ingest = "fantasy_helper.ingest.run:main"
 fh-predict = "fantasy_helper.predict:main"
 fh-waivers = "fantasy_helper.waivers:main"
 fh-api = "fantasy_helper.api.app:main"
+fh-copy-db = "fantasy_helper.db.copy:main"
+
+[project.optional-dependencies]
+aws = [
+    "boto3>=1.43.123",
+    "mangum>=0.22.0",
+]
 
 [build-system]
 requires = ["uv_build>=0.12.0,<0.13.0"]
