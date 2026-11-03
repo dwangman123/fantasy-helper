@@ -55,6 +55,13 @@ sides, and evaluates any deal of up to 3 players a side. The League page has pow
 heatmap with punts marked. The measure can call a lopsided deal a gain for a team that punts the
 star's categories, so each player's z-score value is shown next to him (see PROJECT_PLAN.md).
 
+**Week 6 (AWS deploy): built, not yet applied.** Terraform in `infra/terraform/` runs the backend
+as one container image on two AWS Lambda functions: the REST API behind a public function URL,
+and the ingest on an hourly EventBridge Scheduler cron. The database is Postgres on Neon's free
+plan, and its URL lives in Secrets Manager. The Next.js frontend is on Vercel, proxying `/api/*`
+to the function URL. GitHub Actions runs the checks on every push and deploys on demand. Expected
+cost is about $1 a month (see *Deploy* below and PROJECT_PLAN.md).
+
 ## Backend quickstart
 
 Requires [uv](https://docs.astral.sh/uv/). Python 3.12 is installed by uv automatically.
@@ -88,6 +95,84 @@ npm run build && npm run typecheck
 
 Set `API_URL` if the backend isn't at `http://127.0.0.1:8000`.
 
+## Deploy
+
+```
+EventBridge Scheduler (hourly) -> ingest (Lambda) --> Postgres (Neon, free plan)
+                                                          ^
+browser -> Next.js (Vercel) -- /api/* --> API (Lambda function URL)
+```
+
+Both functions run the same image (`backend/Dockerfile`) and read their settings from one JSON
+secret, `fantasy-helper/app` (`{"FH_DATABASE_URL": "..."}`), through `FH_SECRET_ID`. Reads are
+public. A Refresh within 2 minutes of the last successful ingest returns that run, and a Postgres
+advisory lock keeps a Refresh and the scheduled ingest from overlapping.
+
+**Cost (estimates).** About $1 a month: the Secrets Manager secret ($0.40), image storage and
+logs. Lambda stays inside its always-free tier (1M requests and 400,000 GB-seconds a month), and
+Vercel Hobby is free. Neon's free plan allows 0.5 GB of storage, 100 CU-hours of compute and 5 GB
+of network transfer per month. Transfer is the limit to watch late in the season, since each
+context load reads the box-score history (Neon's console shows usage). Set `alert_email` to get
+an AWS Budgets email at 80% of $5.
+
+**You need:** an AWS account, a [Neon](https://neon.com) account and a [Vercel](https://vercel.com)
+account; the AWS CLI with a profile (`brew install awscli`, then `aws configure sso` or
+`aws configure`; credentials stay in `~/.aws`); and Terraform 1.11+ (`brew tap hashicorp/tap &&
+brew install hashicorp/tap/terraform`).
+
+### First deploy
+
+1. **Database.** Create a Neon project in AWS us-east-1 and copy its **direct** connection string,
+   not the `-pooler` host: the ingest lock needs a session of its own.
+2. **Bootstrap stack:** state bucket, image repository, app secret and GitHub deploy role.
+   ```bash
+   cd infra/terraform/bootstrap
+   terraform init && terraform apply
+   ```
+3. **Secret value.** In the Secrets Manager console, open `fantasy-helper/app` and store the
+   plaintext `{"FH_DATABASE_URL": "postgresql://...?sslmode=require"}`. Or:
+   `aws secretsmanager put-secret-value --secret-id fantasy-helper/app --secret-string '{"FH_DATABASE_URL": "..."}'`.
+4. **Schema and data.** From `backend/`, before step 6 schedules any ingest: the copy needs an
+   empty database. Both commands read the URL from the secret through your AWS profile.
+   ```bash
+   FH_SECRET_ID=fantasy-helper/app uv run --extra aws alembic upgrade head
+   FH_SECRET_ID=fantasy-helper/app uv run --extra aws fh-copy-db sqlite:///fantasy.db
+   ```
+5. **First image.** In the GitHub repo's Settings > Secrets and variables > Actions > Variables, add
+   `AWS_DEPLOY_ROLE_ARN` (the bootstrap's `deploy_role_arn` output) and `AWS_REGION`
+   (`us-east-1`). Then run Actions > Deploy on `main`. It pushes the image and notes that the
+   functions don't exist yet.
+6. **Main stack:** both functions, the function URL, the schedule, logs and the budget.
+   ```bash
+   cd infra/terraform
+   cp terraform.tfvars.example terraform.tfvars   # set alert_email
+   terraform init -backend-config="bucket=<state_bucket output>" -backend-config="region=us-east-1"
+   terraform apply                                # prints api_url
+   ```
+7. **Check that ESPN answers from AWS** with one ingest now:
+   ```bash
+   aws lambda invoke --function-name fantasy-helper-ingest /dev/stdout
+   aws logs tail /aws/lambda/fantasy-helper-ingest --since 10m   # "ingest N succeeded"
+   ```
+8. **Frontend.** In Vercel, import the repo, set Root Directory to `frontend`, and add the
+   environment variable `API_URL` = the `api_url` output, *before* the first build: Next.js bakes
+   rewrites in at build time. Vercel then redeploys on every push to `main`.
+9. **Verify.** The Vercel URL loads, and after the next full hour
+   `aws logs tail /aws/lambda/fantasy-helper-ingest --since 1h` shows the scheduled run.
+
+### After that
+
+- **Backend code:** run Actions > Deploy. It migrates the database (`alembic upgrade head`), then
+  moves both functions to the new image and checks `/api/health`. Add a `push` trigger to
+  `.github/workflows/deploy.yml` to deploy on every merge instead.
+- **Frontend:** Vercel deploys each push to `main`, and previews other branches.
+- **Infrastructure:** `terraform plan` / `apply` in `infra/terraform`. Deploys never change the
+  infrastructure, and Terraform leaves the functions' image alone.
+- **Production data locally:** copy it into a fresh SQLite file:
+  `FH_DATABASE_URL=sqlite:///prod.db uv run alembic upgrade head && FH_DATABASE_URL=sqlite:///prod.db uv run fh-copy-db '<neon url>'`.
+- **Teardown:** `terraform destroy` in `infra/terraform`, then in `bootstrap`. The state bucket
+  must be emptied first, and the secret stays recoverable for 7 days.
+
 ## Layout
 
 ```
@@ -98,7 +183,7 @@ backend/
     calendar.py      matchup week <-> scoring period (day) mapping
     domain.py        ESPN-independent snapshot types
     espn/            ESPN fetch (client.py) and pure parsing (parse.py)
-    db/              SQLAlchemy models + session
+    db/              SQLAlchemy models + session, `fh-copy-db` (copy between databases)
     ingest/          snapshot persistence + `fh-ingest` job
     analytics/       pure functions: z-scores, team profiles, blended rates, lineup cap,
                      opponent factors, dispersion fit, matchup simulation, waiver rankings,
@@ -108,10 +193,14 @@ backend/
     waivers.py       stream/hold rankings for one team + `fh-waivers`
     trades.py        trade evaluation and the trade finder for one team
     api/             FastAPI app (`fh-api`)
+    aws.py           Lambda entry points: the API (via Mangum) and the scheduled ingest
   alembic/           migrations
   data/              per-season matchup calendars
   tests/
+  Dockerfile         the Lambda image (API by default; the ingest overrides the command)
 frontend/            Next.js + TanStack Query: Matchup, Team, League, Waivers and Trades pages
+infra/terraform/     bootstrap/ (state, image repo, secret, deploy role) and the main stack
+.github/workflows/   ci.yml (checks on every push), deploy.yml (backend deploy, run by hand)
 ```
 
 ## Data notes

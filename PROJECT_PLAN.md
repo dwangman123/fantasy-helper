@@ -20,11 +20,12 @@ Verified on day 1 (2026-10-20): league "Bicoastal Ballaz", ID 1396633554, season
 
 ## Architecture
 ```
-EventBridge (cron) → ingest job (ECS task) → Postgres (RDS)
-                                               ↑
-Next.js frontend ←→ FastAPI (App Runner/ECS) ──┤
-                       └─ /agent → OpenAI tool-calling loop → calls the same analytics services
+EventBridge Scheduler (hourly) → ingest (Lambda) ──────→ Postgres (Neon)
+                                                            ↑
+Next.js (Vercel) ── /api/* ──→ FastAPI (Lambda function URL) ┘
+                                  └─ /agent → OpenAI tool-calling loop → calls the same analytics services
 ```
+(Planned as ECS/App Runner + RDS; changed for cost in Milestone 6.)
 - **Ingestion** (`backend/src/fantasy_helper/ingest/`): `espn-api` provides league settings (incl. lineup slots and scoring type), rosters, free agents, stat windows, the NBA schedule and matchups (category totals plus makes/attempts). Replaces season tables atomically. Also keeps history that is never wiped: daily box scores (`player_game_stats`, missing days backfilled) and one prediction row per matchup per run (`matchup_predictions`, append-only). Opponent stats (`nba_team_opponent_stats`) come from ESPN's public site API. Runs on demand (`fh-ingest` or the UI's Refresh), during games too: today's lines and NBA game states (`live_game_stats`, `live_games`) make the totals live. ✅ built
 - **Analytics core** (`backend/src/fantasy_helper/analytics/`): pure, unit-tested functions. This is the heart of the project:
   - `zscores.py`: per-cat z-scores over a configurable window (season / L14 / L7). FG% and FT% are **volume-weighted impact** (makes − league% × attempts). TO is negated.
@@ -60,7 +61,37 @@ Next.js frontend ←→ FastAPI (App Runner/ECS) ──┤
    - **The finder's screen** (findings on real data, Oct 2026): a first-order estimate (each player's expected weekly stats times the slope of the team's P(win) per category) correlates about 0.95 with the full score on a sample of deals, but on average overrates 2-for-1s by about 0.1-0.15 categories a week because it ignores the lineup cap. Ranking the screen by my gain alone mostly picked deals that failed the partner's minimum: 21 listable deals, nearly all with the weakest team, or 7 when each partner was screened separately. Screening each partner and each deal shape separately, by the smaller side's estimate, finds ~125 targets from ~300 full evaluations in about 2.5 s.
    - **Known limit:** the measure saturates. A team far behind in a category gains almost nothing from help there, so the finder can propose a star for role players to a team that punts the star's categories (e.g. Shai Gilgeous-Alexander to me from a team punting 3PM, AST and STL), and the model calls it a gain for them. The UI shows each player's z-score value so these stand out; a real manager would likely refuse. A value or acceptance check is a possible next step.
 5. **Wk 5 – Agent**: OpenAI tool loop, streaming chat UI, evals.
-6. **Wk 6 – AWS deploy**: Terraform (RDS, ECS/App Runner, EventBridge, Secrets Manager for the OpenAI key), GitHub Actions CI/CD, frontend on Amplify/Vercel.
+6. **Wk 6 – AWS deploy** (built 2026-11-02; not yet applied): Terraform, GitHub Actions CI/CD, frontend on Vercel. Steps are in the README's *Deploy* section.
+   - **Decided (2026-11-02), cost first: about $1 a month.**
+     - **Compute:** the backend is one container image (`backend/Dockerfile`) run as two Lambda functions. The API runs behind a public function URL (via Mangum). The ingest runs on an EventBridge Scheduler cron, **hourly around the clock** (America/New_York).
+     - **Database:** Postgres on Neon's free plan, not RDS. The app only reads a database URL, so moving to RDS later is a URL change.
+     - **Local data is copied** with `fh-copy-db`: the weeks 1-2 odds history (`matchup_predictions`) and moves older than 14 days can't be re-fetched. Box scores would backfill on their own.
+     - **Access:** reads are public, since a resume link should open for anyone. Refresh returns the last run if one succeeded in the past 2 minutes (`FH_REFRESH_COOLDOWN_SECONDS`).
+     - **Secrets:** one Secrets Manager secret holds a JSON object of `FH_*` settings, read at startup through `FH_SECRET_ID`. Milestone 5 adds `FH_OPENAI_API_KEY` to it with no infrastructure change. The agent endpoint will cost money per call, so it will need its own protection then.
+     - **Frontend** on Vercel Hobby, free. Amplify's support for Next.js 16 wasn't confirmed.
+   - **Terraform:** `infra/terraform/bootstrap/` holds what must exist before the first image: the state bucket, ECR, the app secret, and a GitHub OIDC deploy role limited to `main`. Its state is local. `infra/terraform/` holds the functions, the function URL (with both invoke permissions), the schedule, log groups (30 days) and an AWS Budgets alert. Deploys move the functions to new images, and Terraform ignores `image_uri`.
+   - **CI/CD:** `ci.yml` runs on every push:
+     - **Backend:** ruff, and `alembic upgrade head` plus `alembic check` on a Postgres 16 service container. Then pytest; `tests/test_postgres.py` runs only there.
+     - **Frontend:** typecheck and build.
+     - **Terraform:** fmt and validate for both stacks.
+     - **Image:** builds it and answers `/api/health` through the base image's runtime emulator.
+
+     `deploy.yml` is started by hand. It builds and pushes the image, migrates, updates both functions, then checks `/api/health`. Vercel deploys the frontend on push.
+   - **Findings:**
+     - **App Runner** closed to new customers on 2026-04-30; AWS points to ECS Express Mode.
+     - **Fargate's real cost is the networking.** A task needs a public IP or a NAT (~$32/mo) to reach ESPN. ESPN's fantasy API host (`lm-api-reads.fantasy.espn.com`) has no IPv6 address, so IPv6-only egress is out. Priced from third-party lists: RDS db.t4g.micro ≈ $14/mo; one Fargate task (0.5 vCPU, ARM) ≈ $14 on demand, ~70% less on Spot; an ALB ≈ $16 plus public IPs. Lambda outside a VPC reaches ESPN and Neon directly and stays inside the always-free tier.
+     - **Simulation timings with a cold cache, on an M3:** waivers 2.9 s, trades 2.5 s, matchups 0.3 s. Importing the app takes 0.7-1.6 s, the main part of a cold start.
+     - **Lambda runs several environments,** so the API's in-process refresh lock no longer stops overlap. The ingest now takes a Postgres advisory lock: a scheduled run skips, and a Refresh returns 409. Session locks need Neon's direct host, not the `-pooler` one.
+     - **Next.js evaluates rewrites at build time,** so Vercel needs `API_URL` before its first build.
+   - **Trade-offs accepted:**
+     - A cold start of a few seconds after idle periods.
+     - Each Lambda environment keeps its own snapshot cache.
+     - Dependence on Neon's free plan: 0.5 GB of storage, 100 CU-hours and 5 GB of transfer a month. Transfer is the one to watch as the box-score history grows.
+   - **Still to verify after the apply:**
+     - ESPN answers requests from AWS addresses.
+     - Vercel's proxy reaches the function URL.
+     - The hourly ingest shows up in CloudWatch.
+     - Neon's monthly transfer stays under the cap.
 7. **Wk 7–8 – Polish + resume extras**: backtest the stored `matchup_predictions` against final weekly results (Brier score / calibration; also tunes the blend constant, opponent shrinkage and day-to-day P(play)), observability (structured logs, agent token/cost tracking), README with architecture diagram, short demo video.
 
 ## Repo layout
