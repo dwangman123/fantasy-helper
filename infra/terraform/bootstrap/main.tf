@@ -72,6 +72,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "state" {
 resource "aws_ecr_repository" "app" {
   name                 = var.project
   image_tag_mutability = "MUTABLE" # tags are commit SHAs; a re-run of a deploy pushes the same tag
+  force_delete         = true      # so a teardown doesn't stop at the stored images
   image_scanning_configuration {
     scan_on_push = true
   }

@@ -28,7 +28,7 @@ jobs:
       POSTGRES_URL: postgresql://fantasy:fantasy@localhost:5432/fantasy
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.0 # publishes no major tag
         with:
           version: "0.12.0"
           enable-cache: true

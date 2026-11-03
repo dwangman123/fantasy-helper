@@ -133,10 +133,13 @@ brew install hashicorp/tap/terraform`).
    plaintext `{"FH_DATABASE_URL": "postgresql://...?sslmode=require"}`. Or:
    `aws secretsmanager put-secret-value --secret-id fantasy-helper/app --secret-string '{"FH_DATABASE_URL": "..."}'`.
 4. **Schema and data.** From `backend/`, before step 6 schedules any ingest: the copy needs an
-   empty database. Both commands read the URL from the secret through your AWS profile.
+   empty database. Both commands read the URL from the secret through your AWS profile (add
+   `AWS_PROFILE=<name>` for a named profile). An `FH_DATABASE_URL` in `backend/.env` would take
+   precedence over the secret, so make sure none is set.
    ```bash
-   FH_SECRET_ID=fantasy-helper/app uv run --extra aws alembic upgrade head
-   FH_SECRET_ID=fantasy-helper/app uv run --extra aws fh-copy-db sqlite:///fantasy.db
+   export FH_SECRET_ID=fantasy-helper/app AWS_REGION=us-east-1
+   uv run --extra aws alembic upgrade head
+   uv run --extra aws fh-copy-db sqlite:///fantasy.db
    ```
 5. **First image.** In the GitHub repo's Settings > Secrets and variables > Actions > Variables, add
    `AWS_DEPLOY_ROLE_ARN` (the bootstrap's `deploy_role_arn` output) and `AWS_REGION`
@@ -171,7 +174,9 @@ brew install hashicorp/tap/terraform`).
 - **Production data locally:** copy it into a fresh SQLite file:
   `FH_DATABASE_URL=sqlite:///prod.db uv run alembic upgrade head && FH_DATABASE_URL=sqlite:///prod.db uv run fh-copy-db '<neon url>'`.
 - **Teardown:** `terraform destroy` in `infra/terraform`, then in `bootstrap`. The state bucket
-  must be emptied first, and the secret stays recoverable for 7 days.
+  must be emptied first (it keeps old versions), and the secret stays recoverable for 7 days.
+- **Changing the secret:** each function reads it once per cold start, so a new value applies
+  after the next deploy, or once Lambda recycles its environments.
 
 ## Layout
 
