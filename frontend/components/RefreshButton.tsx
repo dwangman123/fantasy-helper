@@ -2,8 +2,8 @@
 
 import { useRefresh } from "@/lib/api";
 
-// Once games start, ESPN's live totals include today's games, which the projections also
-// count. The ingest flags such a run in its warnings, and the banner under the top bar shows them.
+// Runs the ingest now. During games it's live: totals so far include today's lines, and only
+// the rest of each game is projected. The run's warnings show in the banner under the top bar.
 export function RefreshButton() {
   const refresh = useRefresh();
   return (
@@ -13,7 +13,7 @@ export function RefreshButton() {
         className="refresh"
         onClick={() => refresh.mutate()}
         disabled={refresh.isPending}
-        title="Pull the latest league data from ESPN. Best before the day's first game: once games start, today's games count twice in the projections."
+        title="Pull the latest league data from ESPN. During games, totals include today's lines so far and only the rest of each game is projected."
       >
         <span aria-hidden className={refresh.isPending ? "spin" : undefined}>
           ↻
