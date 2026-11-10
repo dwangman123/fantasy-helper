@@ -82,6 +82,8 @@ Configuration lives in `backend/src/fantasy_helper/config.py` and can be overrid
 `FH_*` env vars or `backend/.env` (see `backend/.env.example`). To use Postgres instead of
 SQLite, run `docker compose up -d` and set `FH_DATABASE_URL`.
 
+[backend/README.md](backend/README.md) covers the data flow, a guide to the modules, the REST API, the commands, the settings, the database and the tests.
+
 ## Frontend quickstart
 
 Requires Node 20.9+. With `fh-api` running:
@@ -94,6 +96,8 @@ npm run build && npm run typecheck
 ```
 
 Set `API_URL` if the backend isn't at `http://127.0.0.1:8000`.
+
+[frontend/README.md](frontend/README.md) covers how the app calls the API, what each page shows, the URL params, the components and the conventions.
 
 ## Deploy
 
@@ -207,6 +211,8 @@ frontend/            Next.js + TanStack Query: Matchup, Team, League, Waivers an
 infra/terraform/     bootstrap/ (state, image repo, secret, deploy role) and the main stack
 .github/workflows/   ci.yml (checks on every push), deploy.yml (backend deploy, run by hand)
 ```
+
+There's more on each half in [backend/README.md](backend/README.md) and [frontend/README.md](frontend/README.md).
 
 ## Data notes
 

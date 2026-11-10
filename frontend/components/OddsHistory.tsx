@@ -12,7 +12,7 @@ const LABEL_GAP = 16; // the least room between the two end labels
 
 type Props = { points: OddsPoint[]; weekStart: string; days: number; left: string; right: string };
 
-// Both teams' chance to win after each daily ingest, placed in time across the matchup week:
+// Both teams' chance to win after each ingest, placed in time across the matchup week:
 // the left team's line in blue, the right team's in red. The gap between them is a tie.
 export function OddsHistory({ points, weekStart, days, left, right }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
