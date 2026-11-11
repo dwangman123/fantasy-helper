@@ -10,10 +10,14 @@ variable "project" {
   default     = "fantasy-helper"
 }
 
-variable "github_repo" {
-  description = "owner/name of the GitHub repository allowed to deploy."
+variable "github_subject_prefix" {
+  description = <<-EOT
+    How GitHub names the repository allowed to deploy in its OIDC tokens: the sub_claim_prefix from
+    `gh api repos/OWNER/NAME/actions/oidc/customization/sub`. With immutable subjects on, that is
+    repo:OWNER@OWNER_ID/NAME@REPO_ID; without, repo:OWNER/NAME.
+  EOT
   type        = string
-  default     = "dwangman123/fantasy-helper"
+  default     = "repo:dwangman123@31421903/fantasy-helper@1431753034"
 }
 
 variable "create_github_oidc_provider" {
