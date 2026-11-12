@@ -166,7 +166,7 @@ brew install hashicorp/tap/terraform`).
    ```
 8. **Frontend.** In Vercel, import the repo, set Root Directory to `frontend`, and add the
    environment variable `API_URL` = the `api_url` output, *before* the first build: Next.js bakes
-   rewrites in at build time. Add `SITE_PASSWORD` too to put the site behind a shared password
+   rewrites in at build time. Add `SITE_PASSWORD` too to put the Trades page behind a shared password
    ([`frontend/proxy.ts`](frontend/proxy.ts)); the function URL itself stays public. Vercel previews every other branch itself, but
    [`frontend/vercel.json`](frontend/vercel.json) turns off its deploys of `main`: the Deploy
    workflow publishes production instead, after the backend. For that, create a Vercel access token
