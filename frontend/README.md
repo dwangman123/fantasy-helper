@@ -6,7 +6,7 @@ Install, dev server, build and the Vercel deploy are in the [root README](../REA
 
 ## Password
 
-[`proxy.ts`](proxy.ts) puts the whole site, pages and `/api/*` alike, behind one shared password (HTTP Basic auth; any user name). Set `SITE_PASSWORD` to turn it on; leave it unset locally and the site is open. It doesn't cover the backend's own URL: anyone who knows the Lambda function URL can still call the API directly.
+[`proxy.ts`](proxy.ts) puts the Trades page, and the two routes only it calls (`/api/trades`, `/api/trade`), behind one shared password (HTTP Basic auth; any user name). The rest of the site stays open. Set `SITE_PASSWORD` to turn it on; leave it unset locally and Trades is open too. After the browser asks once, a cookie (`fh_trades`, a hash of the password) lets the page's own API calls through. The nav links to Trades as a full page load so the browser can show its password prompt. It doesn't cover the backend's own URL: anyone who knows the Lambda function URL can still call the API directly.
 
 ## How it talks to the backend
 

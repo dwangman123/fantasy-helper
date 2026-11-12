@@ -26,11 +26,20 @@ export function TopBar() {
           Fantasy Helper
         </Link>
         <nav className="nav">
-          {LINKS.map((l) => (
-            <Link key={l.href} href={l.href} aria-current={path.startsWith(l.href) ? "page" : undefined}>
-              {l.label}
-            </Link>
-          ))}
+          {LINKS.map((l) => {
+            const current = path.startsWith(l.href) ? "page" : undefined;
+            // Trades can sit behind a password (proxy.ts): load it as a full page so the browser
+            // can ask for it, rather than a client-side navigation that would just get a 401.
+            return l.href === "/trades" ? (
+              <a key={l.href} href={l.href} aria-current={current}>
+                {l.label}
+              </a>
+            ) : (
+              <Link key={l.href} href={l.href} aria-current={current}>
+                {l.label}
+              </Link>
+            );
+          })}
         </nav>
         {league && (
           <div className="topbar-meta">
