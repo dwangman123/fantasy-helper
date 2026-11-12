@@ -1,0 +1,66 @@
+{
+  "season": 2026,
+  "source": "ESPN NBA game logs (https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/athletes/{player_id}/gamelog?season={season}), candidates from ESPN fantasy ownership (https://lm-api-reads.fantasy.espn.com/apis/v3/games/fba/seasons/{season}/segments/0/leaguedefaults/3?view=kona_player_info)",
+  "fitted": "2026-11-12",
+  "candidates": 300,
+  "pool_size": 130,
+  "min_games": 20,
+  "min_week_games": 3,
+  "min_weeks": 4,
+  "categories": {
+    "PTS": {
+      "weekly_var": 17.834049743441675,
+      "single_game_var": 14.96939392017537,
+      "pool_mean": 17.448040014444462,
+      "pool_sd": 5.420676304667337
+    },
+    "BLK": {
+      "weekly_var": 0.2436024658260382,
+      "single_game_var": 0.22581531120796258,
+      "pool_mean": 0.6954053757761681,
+      "pool_sd": 0.48467310551160614
+    },
+    "STL": {
+      "weekly_var": 0.32737003806911275,
+      "single_game_var": 0.3213629931771473,
+      "pool_mean": 1.0472045878420386,
+      "pool_sd": 0.3401914015484789
+    },
+    "AST": {
+      "weekly_var": 1.647890375387171,
+      "single_game_var": 1.394845999562154,
+      "pool_mean": 3.9077944945493917,
+      "pool_sd": 2.0160797155799854
+    },
+    "REB": {
+      "weekly_var": 2.625750117259648,
+      "single_game_var": 2.2601453600596395,
+      "pool_mean": 5.886211788073266,
+      "pool_sd": 2.24723748158597
+    },
+    "TO": {
+      "weekly_var": 0.6211381238691625,
+      "single_game_var": 0.5712530283010585,
+      "pool_mean": 1.9454864213418008,
+      "pool_sd": 0.766190175590099
+    },
+    "3PM": {
+      "weekly_var": 0.6668166926999705,
+      "single_game_var": 0.5946405815622217,
+      "pool_mean": 1.7365815853988553,
+      "pool_sd": 0.9828168334123389
+    },
+    "FG%": {
+      "weekly_var": 0.836224680397272,
+      "single_game_var": 0.8511269009273157,
+      "pool_mean": 1.9471603816502745e-16,
+      "pool_sd": 0.6414227789205592
+    },
+    "FT%": {
+      "weekly_var": 0.20877257387682513,
+      "single_game_var": 0.19545475258246436,
+      "pool_mean": 2.7755575615628914e-17,
+      "pool_sd": 0.33109075777413893
+    }
+  }
+}

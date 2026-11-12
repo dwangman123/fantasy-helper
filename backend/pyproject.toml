@@ -25,6 +25,7 @@ fh-predict = "fantasy_helper.predict:main"
 fh-waivers = "fantasy_helper.waivers:main"
 fh-api = "fantasy_helper.api.app:main"
 fh-copy-db = "fantasy_helper.db.copy:main"
+fh-fit-bounce = "fantasy_helper.fit_bounce:main"
 
 [project.optional-dependencies]
 aws = [

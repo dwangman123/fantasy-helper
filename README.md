@@ -41,7 +41,10 @@ be picked too: ESPN's final totals, who won each category, that week's box score
 and how the odds moved during it. A Team page shows any team's roster with per-game averages over a chosen stat window,
 cells shaded by z-score and specialist tags (categories a player is 1+ SD above the rostered
 average in), the team's per-game category totals with league ranks and inferred punts, and its
-recent adds, drops and trades.
+recent adds, drops and trades. A player's value is his G-score: his z-scores summed, each
+weighted by how predictable its category is week to week (fitted from last season's weekly
+game logs by `fh-fit-bounce`), so steals and the percentages count for less. The same value
+orders who starts on crowded days in every simulation and which players are drop candidates.
 Still to verify: that ESPN's daily rosters update box scores during a game (checked only after
 games ended).
 
@@ -53,7 +56,7 @@ searching every 1-for-1 and 2-for-1 trade with every other team and keeping thos
 sides, and evaluates any deal of up to 3 players a side. The League page has power rankings
 (rest-of-season all-play strength next to the all-play record so far) and a 10-team category
 heatmap with punts marked. The measure can call a lopsided deal a gain for a team that punts the
-star's categories, so each player's z-score value is shown next to him (see PROJECT_PLAN.md).
+star's categories, so each player's G-score value is shown next to him (see PROJECT_PLAN.md).
 
 **Week 6 (AWS deploy): built, not yet applied.** Terraform in `infra/terraform/` runs the backend
 as one container image on two AWS Lambda functions: the REST API behind a public function URL,
@@ -210,6 +213,7 @@ backend/
     predict.py       current-week predictions from stored data + `fh-predict`
     waivers.py       stream/hold rankings for one team + `fh-waivers`
     trades.py        trade evaluation and the trade finder for one team
+    fit_bounce.py    `fh-fit-bounce`: weekly bounce for the G-score weights, from last season
     api/             FastAPI app (`fh-api`)
     aws.py           Lambda entry points: the API (via Mangum) and the scheduled ingest
   alembic/           migrations

@@ -94,7 +94,7 @@ export type Player = {
   position: string;
   injury_status: string | null;
   z: Record<string, number>;
-  z_total: number;
+  value: number; // G-score: z weighted by how much each category bounces week to week
 };
 
 // Counting stats plus FGM/FGA/FTM/FTA; percentages are derived from makes and attempts.
@@ -140,7 +140,7 @@ export type TeamPlayer = {
   mpg: number | null;
   per_game: Stats | null; // null: no line in this window
   z: Record<string, number>; // this window, against rostered players
-  z_total: number;
+  value: number; // G-score over this window
   specialties: string[];
 };
 

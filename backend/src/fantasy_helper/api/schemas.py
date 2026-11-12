@@ -138,7 +138,7 @@ class PlayerOut(BaseModel):
     position: str
     injury_status: str | None
     z: dict[str, float]  # blended per-category z-scores
-    z_total: float
+    value: float  # G-score: z weighted by how much each category bounces week to week
 
 
 class GameOut(BaseModel):
@@ -265,7 +265,7 @@ class TeamPlayer(BaseModel):
     mpg: float | None
     per_game: dict[str, float] | None  # counting stats plus makes and attempts
     z: dict[str, float]  # this window, against rostered players
-    z_total: float
+    value: float  # G-score over this window
     specialties: list[str]  # categories he stands out in, strongest first
 
 

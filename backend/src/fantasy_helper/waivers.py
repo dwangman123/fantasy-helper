@@ -53,7 +53,7 @@ def current_matchup(session: Session, ctx: LeagueContext, team_id: int) -> Match
 def default_drops(ctx: LeagueContext, team_id: int, n: int = N_DROPS) -> list[int | None]:
     """My n lowest-priority players, plus None (add without dropping) if a roster spot is open."""
     entries = ctx.team_entries(team_id)
-    ranked = sorted((r.player_id for r in entries if r.player_id in ctx.z), key=lambda pid: ctx.z[pid].total)
+    ranked = sorted((r.player_id for r in entries if r.player_id in ctx.z), key=lambda pid: ctx.z[pid].value)
     return ([None] if len(entries) < ctx.roster_spots else []) + ranked[:n]
 
 

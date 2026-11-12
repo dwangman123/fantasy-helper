@@ -166,7 +166,9 @@ function RosterTable({ players, profile, categories }: RosterProps) {
                 {c.key}
               </th>
             ))}
-            <th className="num">Value</th>
+            <th className="num" title="G-score: z-scores summed, each weighted by how predictable its category is week to week">
+              Value
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -198,7 +200,7 @@ function RosterTable({ players, profile, categories }: RosterProps) {
                 </td>
               ))}
               <td className="num">
-                <strong>{p.per_game ? p.z_total.toFixed(1) : "–"}</strong>
+                <strong>{p.per_game ? p.value.toFixed(1) : "–"}</strong>
               </td>
             </tr>
           ))}
