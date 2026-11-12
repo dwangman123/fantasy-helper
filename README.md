@@ -163,16 +163,25 @@ brew install hashicorp/tap/terraform`).
    ```
 8. **Frontend.** In Vercel, import the repo, set Root Directory to `frontend`, and add the
    environment variable `API_URL` = the `api_url` output, *before* the first build: Next.js bakes
-   rewrites in at build time. Vercel then redeploys on every push to `main`.
+   rewrites in at build time. Vercel previews every other branch itself, but
+   [`frontend/vercel.json`](frontend/vercel.json) turns off its deploys of `main`: the Deploy
+   workflow publishes production instead, after the backend. For that, create a Vercel access token
+   (Account Settings > Tokens) and add it to the GitHub repo as the secret `VERCEL_TOKEN`, plus the
+   variables `VERCEL_ORG_ID` (the team ID) and `VERCEL_PROJECT_ID` (Project Settings > General).
 9. **Verify.** The Vercel URL loads, and after the next full hour
    `aws logs tail /aws/lambda/fantasy-helper-ingest --since 1h` shows the scheduled run.
 
 ### After that
 
-- **Backend code:** run Actions > Deploy. It migrates the database (`alembic upgrade head`), then
-  moves both functions to the new image and checks `/api/health`. Add a `push` trigger to
-  `.github/workflows/deploy.yml` to deploy on every merge instead.
-- **Frontend:** Vercel deploys each push to `main`, and previews other branches.
+- **Deploys:** once CI passes for a push to `main`, Actions > Deploy runs on its own: the backend
+  first, then the frontend, so the site never calls an API older than itself. The backend step
+  migrates the database (`alembic upgrade head`), moves both functions to the new image and checks
+  `/api/health`. Only then does the frontend build with Vercel's production settings and go live;
+  if the backend fails, the old frontend stays up. If CI runs finish out of order, only `main`'s
+  newest commit deploys. To redeploy without a push, run Actions > Deploy on `main` by hand. The
+  deploy role only trusts `main`, so other branches can't deploy. Every push to `main` deploys
+  both halves, so even a frontend-only change takes CI plus the backend deploy to go live.
+- **Frontend previews:** Vercel still builds every branch other than `main` itself.
 - **Infrastructure:** `terraform plan` / `apply` in `infra/terraform`. Deploys never change the
   infrastructure, and Terraform leaves the functions' image alone.
 - **Production data locally:** copy it into a fresh SQLite file:
@@ -209,7 +218,7 @@ backend/
   Dockerfile         the Lambda image (API by default; the ingest overrides the command)
 frontend/            Next.js + TanStack Query: Matchup, Team, League, Waivers and Trades pages
 infra/terraform/     bootstrap/ (state, image repo, secret, deploy role) and the main stack
-.github/workflows/   ci.yml (checks on every push), deploy.yml (backend deploy, run by hand)
+.github/workflows/   ci.yml (checks on every push), deploy.yml (backend, then frontend, after CI passes on main)
 ```
 
 There's more on each half in [backend/README.md](backend/README.md) and [frontend/README.md](frontend/README.md).
