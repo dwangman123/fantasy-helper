@@ -1,4 +1,5 @@
 from datetime import UTC, date, datetime
+from types import SimpleNamespace
 
 from fantasy_helper.calendar import MatchupCalendar
 from fantasy_helper.categories import KNOWN_CATEGORIES
@@ -20,6 +21,15 @@ def test_stat_lines_keep_components_and_skip_empty_windows():
     assert line.gp == 70 and line.per_game["PTS"] == 26.7 and line.per_game["3PM"] == 3.4
     assert "FG%" not in line.per_game  # percentages are derived, never stored
     assert line.per_game["FGM"] == 9.1 and line.per_game["REB"] == 0.0
+
+
+def test_owner_names_capitalize_and_split_shared_first_names():
+    def team(team_id, first=None, last=None, name="Team"):
+        owners = [{"firstName": first, "lastName": last, "displayName": "ESPNFAN123"}] if first else []
+        return SimpleNamespace(team_id=team_id, team_name=f" {name} ", owners=owners)
+
+    teams = [team(1, "den", "wang"), team(2, "Sam", "Lee"), team(3, "sam", "Park"), team(4, name="Jalen Brunson")]
+    assert parse.owner_names(teams) == {1: "Den", 2: "Sam L.", 3: "Sam P.", 4: "Jalen Brunson"}
 
 
 def test_pro_games_use_scoring_period_dates():

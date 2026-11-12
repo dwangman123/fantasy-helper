@@ -35,10 +35,10 @@ function WaiversView() {
     <div className={`stack${waivers.isPlaceholderData ? " fetching" : ""}`}>
       <div className="row" style={{ justifyContent: "space-between" }}>
         <div>
-          <h1>Waivers for {teams[teamId]?.name}</h1>
+          <h1>Waivers for {teams[teamId]?.owner}</h1>
           {w && (
             <div className="sub">
-              Week {w.matchup_period} vs {teams[w.opponent_id]?.name}: {pct(w.baseline.p_win)} to win as is · pickups
+              Week {w.matchup_period} vs {teams[w.opponent_id]?.owner}: {pct(w.baseline.p_win)} to win as is · pickups
               play from {weekday(w.first_day)}
             </div>
           )}

@@ -3,7 +3,15 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 
 export type Category = { key: string; is_percentage: boolean; reverse: boolean };
 
-export type Team = { team_id: number; name: string; abbrev: string; wins: number; losses: number; ties: number };
+export type Team = {
+  team_id: number;
+  name: string;
+  abbrev: string;
+  wins: number;
+  losses: number;
+  ties: number;
+  owner: string; // the owner's first name, which the UI shows in place of the team name
+};
 
 export type IngestRun = {
   id: number;

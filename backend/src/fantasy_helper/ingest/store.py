@@ -44,7 +44,14 @@ def store_snapshot(session: Session, snap: LeagueSnapshot) -> dict[str, int]:
 
     session.add_all(
         m.Team(
-            season=season, team_id=t.team_id, name=t.name, abbrev=t.abbrev, wins=t.wins, losses=t.losses, ties=t.ties
+            season=season,
+            team_id=t.team_id,
+            name=t.name,
+            abbrev=t.abbrev,
+            wins=t.wins,
+            losses=t.losses,
+            ties=t.ties,
+            owner=t.owner or None,
         )
         for t in snap.teams
     )

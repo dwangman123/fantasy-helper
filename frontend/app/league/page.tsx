@@ -133,10 +133,8 @@ function PowerTable({ power, myTeamId }: { power: Power; myTeamId: number }) {
             <tr key={r.team.team_id} className={r.team.team_id === myTeamId ? "selected" : undefined}>
               <td className="sub">{r.rank}</td>
               <td>
-                <TeamName id={r.team.team_id} name={r.team.name} myTeamId={myTeamId} />
-                <div className="player-meta">
-                  {r.team.abbrev} · {record(r.team)}
-                </div>
+                <TeamName id={r.team.team_id} name={r.team.owner} myTeamId={myTeamId} />
+                <div className="player-meta">{record(r.team)}</div>
               </td>
               <td className="num">
                 <div className="meter-cell">
@@ -189,7 +187,7 @@ type HeatmapProps = { teams: TeamProfile[]; categories: Category[]; order?: numb
 function Heatmap({ teams, categories, order, myTeamId }: HeatmapProps) {
   const rank = (id: number) => order?.indexOf(id) ?? -1;
   const rows = [...teams].sort((a, b) =>
-    order ? rank(a.team.team_id) - rank(b.team.team_id) : a.team.name.localeCompare(b.team.name),
+    order ? rank(a.team.team_id) - rank(b.team.team_id) : a.team.owner.localeCompare(b.team.owner),
   );
   return (
     <div className="table-wrap">
@@ -210,10 +208,10 @@ function Heatmap({ teams, categories, order, myTeamId }: HeatmapProps) {
             return (
               <tr key={t.team.team_id} className={t.team.team_id === myTeamId ? "selected" : undefined}>
                 <td>
-                  <TeamName id={t.team.team_id} name={t.team.name} myTeamId={myTeamId} />
+                  <TeamName id={t.team.team_id} name={t.team.owner} myTeamId={myTeamId} />
                 </td>
                 {categories.map((c) => (
-                  <HeatCell key={c.key} team={t.team.name} p={byKey[c.key]} category={c} teams={teams.length} />
+                  <HeatCell key={c.key} team={t.team.owner} p={byKey[c.key]} category={c} teams={teams.length} />
                 ))}
               </tr>
             );

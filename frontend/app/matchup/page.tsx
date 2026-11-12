@@ -4,13 +4,13 @@ import { Suspense } from "react";
 
 import { CategoryH2H } from "@/components/CategoryH2H";
 import { DayLineup } from "@/components/DayLineup";
-import { MatchupSelect, WeekSelect, sides, useMatchupParam, useWeekParam } from "@/components/MatchupSelect";
+import { MatchupStrip, WeekStepper, sides, useMatchupParam, useWeekParam } from "@/components/MatchupPicker";
 import { OddsBar, OddsLegend } from "@/components/OddsBar";
 import { OddsHistory } from "@/components/OddsHistory";
 import { ErrorNotice, Loading } from "@/components/Status";
 import { Tile } from "@/components/Tile";
 import { type MatchupDetail, type Team, useLeague, useMatchup, useMatchups } from "@/lib/api";
-import { dateTime, pct, shortDate } from "@/lib/format";
+import { dateTime, pct } from "@/lib/format";
 
 export default function MatchupPage() {
   return (
@@ -43,26 +43,22 @@ function Matchup() {
   const left = teams[d.team_id];
   const right = teams[d.opponent_id];
   const first = d.week_days[0];
-  const last = d.week_days[d.week_days.length - 1];
   const fetching = detail.isPlaceholderData || scoreboard.isPlaceholderData;
   return (
     <div className={`stack${fetching ? " fetching" : ""}`}>
-      <div className="row" style={{ justifyContent: "space-between" }}>
-        <div>
-          <h1>
-            Week {d.matchup_period}: {left.name} vs {right.name}
-          </h1>
-          <div className="sub">
-            {shortDate(first)} – {shortDate(last)} ·{" "}
-            {d.final
-              ? "final"
-              : `${d.days_left.length} of ${d.week_days.length} days left · ${d.n_sims.toLocaleString()} simulations`}
-          </div>
+      <div className="stack" style={{ gap: 12 }}>
+        <div className="row" style={{ justifyContent: "space-between" }}>
+          <h1>Matchups</h1>
+          <WeekStepper weeks={league.data.weeks} value={week ?? d.matchup_period} onChange={setWeek} />
         </div>
-        <div className="row">
-          <WeekSelect weeks={league.data.weeks} value={week ?? d.matchup_period} onChange={setWeek} />
-          <MatchupSelect rows={scoreboard.data} teams={teams} value={row.espn_id} myTeamId={myId} onChange={setMatchup} />
-        </div>
+        <MatchupStrip
+          rows={scoreboard.data}
+          teams={teams}
+          categories={league.data.categories.length}
+          value={row.espn_id}
+          myTeamId={myId}
+          onChange={setMatchup}
+        />
       </div>
 
       <section className="card">{d.final ? <Result d={d} left={left} right={right} /> : <Odds d={d} left={left} right={right} />}</section>
@@ -74,10 +70,10 @@ function Matchup() {
             <div className="sub">
               {d.final
                 ? "ESPN's final totals"
-                : "Now includes today's games so far; Final is the projected end of the week"}
+                : "Current is each total so far, including today's games. Projected is where it should end the week."}
             </div>
           </div>
-          <OddsLegend labels={[`${left.abbrev} wins`, "Tie", `${right.abbrev} wins`]} />
+          <OddsLegend labels={[`${left.owner} wins`, "Tie", `${right.owner} wins`]} />
         </div>
         <CategoryH2H rows={d.categories} left={left} right={right} final={d.final} />
       </section>
@@ -89,7 +85,7 @@ function Matchup() {
           <h2>{d.final ? "Win odds during the week" : "Win odds this week"}</h2>
           <span className="sub">after each refresh</span>
         </div>
-        <OddsHistory points={d.history} weekStart={first} days={d.week_days.length} left={left.abbrev} right={right.abbrev} />
+        <OddsHistory points={d.history} weekStart={first} days={d.week_days.length} left={left.owner} right={right.owner} />
       </section>
     </div>
   );
@@ -105,7 +101,7 @@ function Odds({ d, left, right }: HeroProps) {
         <Side team={left} value={pct(d.p_win)} note={record(left)} color="var(--win)" />
         <div className="mid">
           <div className="sub">Chance to win the matchup · tie {pct(d.p_tie)}</div>
-          <OddsBar win={d.p_win} tie={d.p_tie} loss={d.p_loss} height={14} labels={[left.abbrev, "Tie", right.abbrev]} />
+          <OddsBar win={d.p_win} tie={d.p_tie} loss={d.p_loss} height={14} labels={[left.owner, "Tie", right.owner]} />
         </div>
         <Side team={right} value={pct(d.p_loss)} note={record(right)} color="var(--loss)" align="right" />
       </div>
@@ -116,11 +112,6 @@ function Odds({ d, left, right }: HeroProps) {
           note={`${d.expected.ties.toFixed(1)} tied`}
         />
         <Tile label="Most likely score" value={`${d.most_likely.me}-${d.most_likely.opp}-${d.most_likely.ties}`} />
-        <Tile
-          label="Starts left"
-          value={`${d.starts_left_me.toFixed(1)} vs ${d.starts_left_opp.toFixed(1)}`}
-          note="after the daily lineup cap"
-        />
       </div>
     </>
   );
@@ -130,7 +121,7 @@ function Odds({ d, left, right }: HeroProps) {
 function Result({ d, left, right }: HeroProps) {
   const { me, opp, ties } = d.expected;
   const n = me + opp + ties;
-  const verdict = me > opp ? `${left.abbrev} won` : opp > me ? `${right.abbrev} won` : "Tied";
+  const verdict = me > opp ? `${left.owner} won` : opp > me ? `${right.owner} won` : "Tied";
   const runs = d.history;
   return (
     <>
@@ -140,7 +131,7 @@ function Result({ d, left, right }: HeroProps) {
           <div className="sub">
             Final · {verdict} {me}-{opp}-{ties}
           </div>
-          <OddsBar win={me / n} tie={ties / n} loss={opp / n} height={14} labels={[left.abbrev, "Tie", right.abbrev]} />
+          <OddsBar win={me / n} tie={ties / n} loss={opp / n} height={14} labels={[left.owner, "Tie", right.owner]} />
         </div>
         <Side team={right} value={String(opp)} note="categories won" color="var(--loss)" align="right" />
       </div>
@@ -173,7 +164,7 @@ function Side({ team, value, note, color, align }: SideProps) {
     <div className={`side${align === "right" ? " right" : ""}`}>
       <div className="tile-label">
         <span className="key" style={{ background: color }} />
-        {team.name}
+        {team.owner}
       </div>
       <div className="hero">{value}</div>
       <div className="sub">{note}</div>

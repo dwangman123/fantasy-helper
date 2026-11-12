@@ -552,16 +552,123 @@ tr.selected td {
   flex-wrap: wrap;
   justify-content: center;
   align-items: baseline;
-  gap: 4px 8px;
+  gap: 4px 6px;
   margin-bottom: 6px;
 }
 
+.h2h-cat .sub {
+  font-size: 12px;
+}
+
+/* Each side's chance to win, with the category's status centered between them. */
 .h2h-odds {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 4px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
   color: var(--ink-2);
   font-size: 12px;
+}
+
+.h2h-odds > :first-child {
+  text-align: left;
+}
+
+.h2h-odds > :last-child {
+  text-align: right;
+}
+
+/* Week stepper and matchup cards */
+
+.week-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+button.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  cursor: pointer;
+}
+
+button.icon-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.week-label {
+  min-width: 132px;
+  text-align: center;
+  line-height: 1.25;
+}
+
+.week-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.week-label .sub {
+  font-size: 12px;
+}
+
+.matchup-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
+  gap: 12px;
+}
+
+button.matchup-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+  font-size: 14px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+/* The viewed matchup: a 2px ring without shifting the layout. */
+button.matchup-card[aria-pressed="true"] {
+  border-color: var(--win);
+  box-shadow: inset 0 0 0 1px var(--win);
+}
+
+.matchup-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.matchup-line .lead {
+  font-weight: 600;
+}
+
+.matchup-line .trail {
+  color: var(--ink-2);
+}
+
+/* Team category tiles are tinted by rank; this is their key. */
+.rank-scale {
+  display: inline-block;
+  width: 120px;
+  height: 10px;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px var(--border);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--win) 38%, var(--surface)),
+    var(--surface),
+    color-mix(in srgb, var(--loss) 38%, var(--surface))
+  );
 }
 
 /* Team roster */
