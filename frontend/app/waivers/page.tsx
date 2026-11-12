@@ -22,7 +22,7 @@ export default function WaiversPage() {
 
 function WaiversView() {
   const league = useLeague();
-  const [teamId, setTeam] = useTeamParam(league.data?.my_team_id);
+  const [teamId, setTeam] = useTeamParam(league.data?.teams);
   const [sameDay, setSameDay] = useState(false);
   const waivers = useWaivers(teamId, sameDay);
   const error = league.error ?? waivers.error;
@@ -48,7 +48,7 @@ function WaiversView() {
             <input type="checkbox" checked={sameDay} onChange={(e) => setSameDay(e.target.checked)} />
             Pickups can play today
           </label>
-          <TeamSelect teams={league.data.teams} value={teamId} myTeamId={league.data.my_team_id} onChange={setTeam} />
+          <TeamSelect teams={league.data.teams} value={teamId} onChange={setTeam} />
         </div>
       </div>
       {w ? <Rankings w={w} /> : <Loading what="waiver rankings (simulating each swap takes a few seconds)" />}
@@ -95,7 +95,7 @@ function Rankings({ w }: { w: Waivers }) {
         <div className="card-head">
           <h2>Stream: this week</h2>
           <span className="sub">
-            change in your chance to win this matchup · {w.stream_screened} of {w.free_agents} free agents simulated
+            change in the team&apos;s chance to win this matchup · {w.stream_screened} of {w.free_agents} free agents simulated
           </span>
         </div>
         {w.stream.length ? (
@@ -202,9 +202,9 @@ function Rankings({ w }: { w: Waivers }) {
         <h2 style={{ marginBottom: 12 }}>How to read this</h2>
         <ul className="assumptions">
           <li>
-            Drops considered: {drops} (your lowest-value players). Each free agent shows his best drop.
-            &quot;Biggest effects&quot; is the change in your chance to win each category, in points; ✓ and ✗ mark
-            categories that swing in or out of your favor.
+            Drops considered: {drops} (the team&apos;s lowest-value players). Each free agent shows his best drop.
+            &quot;Biggest effects&quot; is the change in the team&apos;s chance to win each category, in points; ✓ and ✗ mark
+            categories that swing in or out of the team&apos;s favor.
           </li>
           {w.assumptions.map((a) => (
             <li key={a}>{a}</li>

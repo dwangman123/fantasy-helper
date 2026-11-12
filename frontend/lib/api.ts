@@ -26,7 +26,6 @@ export type WeekSpan = { matchup_period: number; start: string; end: string };
 export type League = {
   season: number;
   name: string;
-  my_team_id: number;
   today: string;
   scoring_period: number;
   week: { matchup_period: number; start: string; end: string; days: number; days_left: number };
@@ -110,6 +109,11 @@ export type LineupCell = {
   stats: Stats;
   projected: Stats; // the game's projected final; differs from stats only while it's live
   game: Game | null; // today's game; null on other days
+  // The game as one fantasy value: z-scores summed on the single-game scale (TeamLineup.value_scale).
+  // Null without a game.
+  value: number | null; // of stats
+  projected_value: number | null; // of projected
+  value_by_cat: Record<string, number> | null;
 };
 
 export type LineupDay = {
@@ -119,14 +123,18 @@ export type LineupDay = {
   projected: Stats; // counted projected finals
   starts: number;
   missed_starts: number | null;
+  actual_value: number; // counted box scores' values (today's so far)
+  projected_value: number; // counted projected finals' values
 };
 
 export type TeamLineup = {
   team_id: number;
   matchup_period: number;
   days: LineupDay[];
-  players: { player: Player; cells: LineupCell[]; totals: Stats }[];
+  // usual: his per-game averages valued the same way, what his games average out to
+  players: { player: Player; cells: LineupCell[]; totals: Stats; usual: number | null }[];
   totals: Stats; // the week's projected final
+  value_scale: { mean: number; sd: number }; // one game's value over rostered players' games
 };
 
 export type CategoryProfile = { key: string; value: number; rank: number; z: number; punt: boolean };
@@ -145,6 +153,7 @@ export type TeamPlayer = {
 };
 
 export type Move = {
+  transaction_id: string | null; // shared by the moves of one transaction; null for trades
   at: string | null;
   type: "ADD" | "DROP" | "TRADE";
   kind: string;
@@ -161,6 +170,7 @@ export type TeamDetail = {
   players: TeamPlayer[];
   moves: Move[];
   notes: string[];
+  sources: { label: string; url: string }[];
 };
 
 export type StreamRow = {
@@ -224,6 +234,7 @@ export type PowerRow = {
   cat_p_win: Record<string, number>;
   all_play: WinLoss; // completed weeks, against every other team
   punts: string[];
+  projected: WinLoss; // record so far plus expected results in the regular-season weeks left (fractional)
 };
 
 export type Power = { weeks: number; first_period: number; completed_weeks: number; rows: PowerRow[]; notes: string[] };

@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense } from "react";
 
 import { InjuryBadge } from "@/components/PlayerCell";
 import { ErrorNotice, Loading } from "@/components/Status";
@@ -27,9 +27,8 @@ export default function TeamPage() {
 
 function TeamView() {
   const league = useLeague();
-  const [teamId, setTeam] = useTeamParam(league.data?.my_team_id);
-  const [statWindow, setStatWindow] = useState("model");
-  const detail = useTeam(teamId, statWindow);
+  const [teamId, setTeam] = useTeamParam(league.data?.teams);
+  const detail = useTeam(teamId, "season");
   const error = league.error ?? detail.error;
   if (error) return <ErrorNotice error={error} />;
   if (!league.data || !detail.data || teamId === undefined) return <Loading what="team" />;
@@ -47,19 +46,7 @@ function TeamView() {
             {team.ties ? `-${team.ties}` : ""} · {d.punts.length ? `punting ${d.punts.join(", ")}` : "no clear punts"}
           </div>
         </div>
-        <div className="row">
-          <TeamSelect teams={league.data.teams} value={teamId} myTeamId={league.data.my_team_id} onChange={setTeam} />
-          <label className="toggle">
-            Stats
-            <select value={statWindow} onChange={(e) => setStatWindow(e.target.value)}>
-              {d.windows.map((w) => (
-                <option key={w} value={w}>
-                  {WINDOW_LABELS[w] ?? w}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
+        <TeamSelect teams={league.data.teams} value={teamId} onChange={setTeam} />
       </div>
 
       <section className="card">
@@ -105,13 +92,26 @@ function TeamView() {
           </div>
           <MoveList moves={d.moves} />
         </section>
-        <section className="card">
+        <section className="card" id="how-to-read">
           <h2 style={{ marginBottom: 12 }}>How to read this</h2>
           <ul className="assumptions">
             {d.notes.map((n) => (
               <li key={n}>{n}</li>
             ))}
           </ul>
+          {d.sources.length > 0 && (
+            <p className="sub" style={{ marginBottom: 0 }}>
+              Source:{" "}
+              {d.sources.map((src, i) => (
+                <span key={src.url}>
+                  {i > 0 && "; "}
+                  <a href={src.url} target="_blank" rel="noreferrer">
+                    {src.label}
+                  </a>
+                </span>
+              ))}
+            </p>
+          )}
         </section>
       </div>
     </div>
@@ -166,8 +166,19 @@ function RosterTable({ players, profile, categories }: RosterProps) {
                 {c.key}
               </th>
             ))}
-            <th className="num" title="G-score: z-scores summed, each weighted by how predictable its category is week to week">
+            <th className="num">
               Value
+              <a
+                href="#how-to-read"
+                className="info"
+                title="G-score: z-scores summed, each weighted by how predictable its category is week to week. See How to read this below."
+                aria-label="What Value means: see How to read this below"
+              >
+                <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden>
+                  <circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                  <path d="M8 7.25v4M8 4.75v.01" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                </svg>
+              </a>
             </th>
           </tr>
         </thead>
@@ -239,27 +250,49 @@ const MOVE_LABELS: Record<Move["type"], [string, string]> = {
   TRADE: ["Traded for", "var(--muted)"],
 };
 
+// One row per transaction: an add and its drop together, or every player received in one
+// trade. ESPN gives trades no id here, so a trade's players are grouped by their timestamp.
+function groupMoves(moves: Move[]): Move[][] {
+  const groups = new Map<string, Move[]>();
+  for (const m of moves) {
+    const key = m.transaction_id ?? `${m.type}-${m.at}`;
+    groups.set(key, [...(groups.get(key) ?? []), m]);
+  }
+  // Adds lead drops within a transaction.
+  const rank = { ADD: 0, TRADE: 0, DROP: 1 };
+  return [...groups.values()].map((g) => g.sort((a, b) => rank[a.type] - rank[b.type]));
+}
+
+const KINDS: Record<string, string> = { WAIVER: "waivers", FREEAGENT: "free agency", TRADE: "trade" };
+
 function MoveList({ moves }: { moves: Move[] }) {
   if (moves.length === 0) return <div className="sub">No moves in the last two weeks.</div>;
   return (
     <table>
       <tbody>
-        {moves.map((m) => {
-          const [label, color] = MOVE_LABELS[m.type];
+        {groupMoves(moves).map((group) => {
+          const first = group[0];
           return (
-            <tr key={`${m.type}-${m.player_id}-${m.at}`}>
-              <td className="sub" style={{ whiteSpace: "nowrap" }}>
-                {m.at ? dayOf(m.at) : "–"}
+            <tr key={group.map((m) => `${m.type}-${m.player_id}`).join("|") + first.at}>
+              <td className="sub" style={{ whiteSpace: "nowrap", verticalAlign: "top" }}>
+                {first.at ? dayOf(first.at) : "–"}
               </td>
               <td>
-                <span className="chip">
-                  <span className="dot" style={{ background: color }} />
-                  {label}
-                </span>
-              </td>
-              <td>
-                <span className="player-name">{m.player_name ?? `Player ${m.player_id}`}</span>
-                <div className="player-meta">{m.kind === "WAIVER" ? "waivers" : m.kind === "FREEAGENT" ? "free agency" : "trade"}</div>
+                <div className="deal-players">
+                  {group.map((m) => {
+                    const [label, color] = MOVE_LABELS[m.type];
+                    return (
+                      <div key={`${m.type}-${m.player_id}`}>
+                        <span className="chip" style={{ marginRight: 8 }}>
+                          <span className="dot" style={{ background: color }} />
+                          {label}
+                        </span>
+                        <span className="player-name">{m.player_name ?? `Player ${m.player_id}`}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="player-meta">{KINDS[first.kind] ?? first.kind.toLowerCase()}</div>
               </td>
             </tr>
           );

@@ -37,11 +37,11 @@ export default function TradesPage() {
 const ids = (raw: string | null) => (raw ? raw.split(",").map(Number).filter((n) => Number.isInteger(n) && n > 0) : []);
 
 // The deal being evaluated lives in the URL next to the team: ?partner=7&give=1,2&get=3.
-function useDeal(myTeamId: number | undefined) {
+function useDeal(teams: Team[] | undefined) {
   const params = useSearchParams();
   const router = useRouter();
   const path = usePathname();
-  const [teamId] = useTeamParam(myTeamId);
+  const [teamId] = useTeamParam(teams);
   const partner = Number(params.get("partner"));
   const deal = {
     partnerId: Number.isInteger(partner) && partner > 0 ? partner : undefined,
@@ -60,13 +60,13 @@ function useDeal(myTeamId: number | undefined) {
     update({ partner: partnerId ? String(partnerId) : null, give: give.join(","), get: receive.join(",") });
   // A different team has a different roster, so its deal starts over.
   const setTeam = (id: number) =>
-    update({ team: id === myTeamId ? null : String(id), partner: null, give: null, get: null });
+    update({ team: String(id), partner: null, give: null, get: null });
   return { teamId, ...deal, setDeal, setTeam };
 }
 
 function TradesView() {
   const league = useLeague();
-  const { teamId, partnerId, give, receive, setDeal, setTeam } = useDeal(league.data?.my_team_id);
+  const { teamId, partnerId, give, receive, setDeal, setTeam } = useDeal(league.data?.teams);
   const trades = useTrades(teamId);
   const error = league.error ?? trades.error;
   if (error) return <ErrorNotice error={error} />;
@@ -93,7 +93,7 @@ function TradesView() {
             </div>
           )}
         </div>
-        <TeamSelect teams={league.data.teams} value={teamId} myTeamId={league.data.my_team_id} onChange={setTeam} />
+        <TeamSelect teams={league.data.teams} value={teamId} onChange={setTeam} />
       </div>
 
       <section className="card">

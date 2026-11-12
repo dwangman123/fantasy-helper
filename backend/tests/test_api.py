@@ -165,6 +165,22 @@ def test_lineup_shows_todays_games_live(client):
     assert abs(day["actual"]["PTS"] - sum(c["stats"]["PTS"] for c in started_live)) < 1e-6
 
 
+def test_lineup_values_each_game_on_the_single_game_scale(client):
+    body = client.get("/api/lineup").json()
+    assert body["value_scale"]["sd"] > 0
+    for i, day in enumerate(body["days"]):
+        cells = [p["cells"][i] for p in body["players"]]
+        for c in cells:
+            has_game = c["slot"] is not None and c["opponent"] is not None
+            assert (c["value"] is not None) == has_game
+            if has_game:
+                assert c["value"] == pytest.approx(sum(c["value_by_cat"].values()))
+        counted = [c for c in cells if c["counts"]]
+        assert day["actual_value"] == pytest.approx(sum(c["value"] for c in counted if c["actual"]))
+        assert day["projected_value"] == pytest.approx(sum(c["projected_value"] for c in counted))
+    assert all(p["usual"] is not None for p in body["players"])
+
+
 def test_team_page_profiles_the_roster_and_lists_moves(client):
     body = client.get("/api/team").json()
     assert body["team"]["team_id"] == MY_TEAM and body["window"] == "model"
@@ -174,6 +190,8 @@ def test_team_page_profiles_the_roster_and_lists_moves(client):
     assert len(body["players"]) == 14 and body["players"][-1]["slot"] == "IR"
     for p in body["players"]:
         assert all(p["z"][k] >= 1.0 for k in p["specialties"]) and len(p["specialties"]) <= 2
+    assert [m["transaction_id"] is None for m in body["moves"]] == [False, False, True]  # trades have no id
+    assert body["sources"] and body["notes"][0].startswith("Value is a G-score")
     assert [(m["type"], m["kind"]) for m in body["moves"]] == [
         ("ADD", "FREEAGENT"),
         ("DROP", "FREEAGENT"),
@@ -270,6 +288,11 @@ def test_power_ranks_every_team_with_the_all_play_record(client):
     for r in rows:  # two completed weeks, nine opponents each
         assert r["all_play"]["wins"] + r["all_play"]["losses"] + r["all_play"]["ties"] == 18
     assert body["first_period"] == 4 and body["notes"]
+    for r in rows:  # the record so far plus every regular-season week still to play (this one included)
+        record, proj = r["team"], r["projected"]
+        assert proj["wins"] >= record["wins"] and proj["losses"] >= record["losses"]
+        played = record["wins"] + record["losses"] + record["ties"]
+        assert sum(proj.values()) > played
 
 
 def test_trade_scores_both_sides(client):

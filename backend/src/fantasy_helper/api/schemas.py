@@ -157,12 +157,18 @@ class LineupCell(BaseModel):
     stats: dict[str, float]  # counting stats plus FGM/FGA/FTM/FTA
     projected: dict[str, float]  # the game's projected final; differs from stats only while it's live
     game: GameOut | None  # today's game; None on other days
+    # The game as one fantasy value: its z-scores summed on the single-game scale (see
+    # TeamLineup.value_scale). None without a game.
+    value: float | None  # of `stats`
+    projected_value: float | None  # of `projected`
+    value_by_cat: dict[str, float] | None  # `value` per category
 
 
 class LineupPlayer(BaseModel):
     player: PlayerOut
     cells: list[LineupCell]  # one per day of the week
     totals: dict[str, float]  # counted games' projected finals
+    usual: float | None  # his per-game averages valued the same way: what his games average out to
 
 
 class LineupDay(BaseModel):
@@ -172,6 +178,15 @@ class LineupDay(BaseModel):
     projected: dict[str, float]  # counted projected finals
     starts: float  # started games; from today, weighted by the chance of playing
     missed_starts: int | None  # extra games the best lineup would start; None once played
+    actual_value: float  # counted box scores' values summed (today's so far)
+    projected_value: float  # counted projected finals' values summed
+
+
+class ValueScale(BaseModel):
+    """Mean and spread of one game's value over rostered players' games this season."""
+
+    mean: float
+    sd: float
 
 
 class TeamLineup(BaseModel):
@@ -182,6 +197,7 @@ class TeamLineup(BaseModel):
     days: list[LineupDay]
     players: list[LineupPlayer]
     totals: dict[str, float]  # the week's projected final
+    value_scale: ValueScale
 
 
 class BoardEntry(BaseModel):
@@ -270,11 +286,17 @@ class TeamPlayer(BaseModel):
 
 
 class MoveOut(BaseModel):
+    transaction_id: str | None  # moves in one ESPN transaction share it; None for trades (ESPN hides their ids)
     at: UtcDatetime | None
     type: str  # ADD / DROP / TRADE (a player received in a trade)
     kind: str  # FREEAGENT / WAIVER / TRADE
     player_id: int
     player_name: str | None
+
+
+class SourceOut(BaseModel):
+    label: str
+    url: str
 
 
 class TeamDetail(BaseModel):
@@ -286,6 +308,7 @@ class TeamDetail(BaseModel):
     players: list[TeamPlayer]
     moves: list[MoveOut]  # newest first
     notes: list[str]
+    sources: list[SourceOut]  # where the notes' methods come from
 
 
 class TeamProfileOut(BaseModel):
@@ -309,6 +332,12 @@ class RecordOut(BaseModel):
     ties: int
 
 
+class ProjectedRecord(BaseModel):
+    wins: float
+    losses: float
+    ties: float
+
+
 class PowerRow(BaseModel):
     team: TeamOut
     rank: int
@@ -317,6 +346,7 @@ class PowerRow(BaseModel):
     cat_p_win: dict[str, float]
     all_play: RecordOut  # every completed week against every other team
     punts: list[str]
+    projected: ProjectedRecord  # the record so far plus expected results in the regular-season weeks left
 
 
 class PowerOut(BaseModel):

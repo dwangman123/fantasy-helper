@@ -4,6 +4,10 @@ The frontend is a Next.js App Router app (React 19, TanStack Query, plain CSS). 
 
 Install, dev server, build and the Vercel deploy are in the [root README](../README.md). The API it calls is documented in the [backend README](../backend/README.md#rest-api).
 
+## Password
+
+[`proxy.ts`](proxy.ts) puts the whole site, pages and `/api/*` alike, behind one shared password (HTTP Basic auth; any user name). Set `SITE_PASSWORD` to turn it on; leave it unset locally and the site is open. It doesn't cover the backend's own URL: anyone who knows the Lambda function URL can still call the API directly.
+
 ## How it talks to the backend
 
 - **Proxy.** The browser only calls `/api/*` on its own origin. [`next.config.ts`](next.config.ts) rewrites those requests to `API_URL` (default `http://127.0.0.1:8000`). On Vercel, `API_URL` is the Terraform `api_url` output (the Lambda function URL), set before the first build (see the root README's *First deploy* steps).
@@ -46,9 +50,9 @@ What's being viewed lives in the query string, so every view can be linked and r
 
 | Param | Pages | Hook | Default |
 |---|---|---|---|
-| `?team=7` | Team, Waivers, Trades | `useTeamParam` ([`TeamSelect.tsx`](components/TeamSelect.tsx)) | my team |
+| `?team=7` | Team, Waivers, Trades | `useTeamParam` ([`TeamSelect.tsx`](components/TeamSelect.tsx)) | the first team by owner |
 | `?week=2` | Matchup | `useWeekParam` ([`MatchupPicker.tsx`](components/MatchupPicker.tsx)) | the current week |
-| `?matchup=12` | Matchup | `useMatchupParam` ([`MatchupPicker.tsx`](components/MatchupPicker.tsx)) | my matchup; changing the week clears it |
+| `?matchup=12` | Matchup | `useMatchupParam` ([`MatchupPicker.tsx`](components/MatchupPicker.tsx)) | the week's first matchup; changing the week clears it |
 | `?partner=7&give=1,2&get=3` | Trades | `useDeal` ([`app/trades/page.tsx`](app/trades/page.tsx)) | no deal; changing the team clears it |
 
 The four pages that read these params (Matchup, Team, Waivers, Trades) render their view inside `<Suspense>`. Follow that pattern in a new page.
@@ -62,7 +66,7 @@ The four pages that read these params (Matchup, Team, Waivers, Trades) render th
 | [`TeamSelect`](components/TeamSelect.tsx) | Team picker, plus `useTeamParam` |
 | [`MatchupPicker`](components/MatchupPicker.tsx) | `WeekStepper` (back and forward through the weeks) and `MatchupStrip` (a card per matchup with each side's win odds, or categories won once the week is over), `useWeekParam` / `useMatchupParam`, and `sides()`, which puts my team on the left (otherwise home) |
 | [`CategoryH2H`](components/CategoryH2H.tsx) | Each category head to head: current and projected totals on either side of its win / tie / loss bar, with the locked / swing status centered under it |
-| [`DayLineup`](components/DayLineup.tsx) | One day of the matchup: both teams' players in their ESPN slots with box scores, live lines or projections |
+| [`DayLineup`](components/DayLineup.tsx) | One day of the matchup: both teams' players in their ESPN slots, each game as one fantasy value (z-scores summed on the single-game scale) shaded against a typical game, with the player's usual and the two categories that moved it |
 | [`OddsHistory`](components/OddsHistory.tsx) | Both teams' win odds after each ingest, across the week (SVG) |
 | [`OddsBar`](components/OddsBar.tsx) | Win / tie / loss as one 100% bar, plus `OddsLegend` |
 | [`DeltaBar`](components/DeltaBar.tsx) | A signed change as a bar from a center line: blue right when it helps, red left when it hurts |
@@ -77,7 +81,8 @@ Formatting helpers are in [`lib/format.ts`](lib/format.ts): percentages, signed 
 
 ## Conventions
 
-- **One team's side.** Matchup, waiver and trade responses are from one team's point of view (`me` / `opp`, `me` / `partner`), so the UI never works out home or away. Blue (`--win`) is the viewed team's side and red (`--loss`) the other's. On the Matchup page the left team is mine when I'm in the matchup, otherwise the home team (`sides()` in `MatchupPicker.tsx`).
+- **One team's side.** Matchup, waiver and trade responses are from one team's point of view (`me` / `opp`, `me` / `partner`), so the UI never works out home or away. Blue (`--win`) is the viewed team's side and red (`--loss`) the other's. On the Matchup page the left team is the home team (`sides()` in `MatchupPicker.tsx`), and each matchup card puts a key square on each name to match.
+- **No viewer identity.** Anyone in the league may be looking, so the UI never marks a team as "mine" and doesn't read `my_team_id`; views default to the first team or matchup.
 - **Teams go by their owner.** Show `team.owner` (the owner's first name, from the backend's `owner_names()`), never the ESPN team name or abbreviation. A snapshot stored before owners were kept sends the team name there until the next ingest.
 - **Percentages come from makes and attempts.** FG% and FT% are computed from summed FGM/FGA and FTM/FTA, never averaged (`PARTS`, `totalValue` in `lib/format.ts`).
 - **Dates.** The API sends days as `YYYY-MM-DD`. Parse them as local days with the helpers in `lib/format.ts`, not with `new Date()`, which would read them as UTC midnight.
