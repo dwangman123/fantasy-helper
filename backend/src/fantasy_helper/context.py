@@ -3,8 +3,9 @@ waiver rankings.
 
 Per player: blended per-game rates (`rates.blend_rates`), games from the NBA
 schedule, each adjusted for the opponent (`opponent.opponent_factors`), a chance
-of playing from ESPN's injury status, and a start priority from blended z-scores
-(baseline: rostered players). Players in the IR slot are left out of a team.
+of playing from ESPN's injury status, and a start priority: his G-score value from
+blended z-scores (baseline: rostered players), weighted by each category's fitted
+weekly bounce (`zscores.gscore_weights`). Players in the IR slot are left out of a team.
 Game-to-game spread comes from the box-score history (`variance.fit_dispersion`),
 falling back to Poisson until there are enough logged games.
 
@@ -23,7 +24,7 @@ from fantasy_helper.analytics.matchup import SimPlayer
 from fantasy_helper.analytics.opponent import opponent_factors
 from fantasy_helper.analytics.rates import blend_rates
 from fantasy_helper.analytics.variance import fit_dispersion
-from fantasy_helper.analytics.zscores import PlayerZ, player_zscores
+from fantasy_helper.analytics.zscores import PlayerZ, baselines, gscore_weights, load_weekly_bounce, player_zscores
 from fantasy_helper.calendar import MatchupCalendar, MatchupWeek, load_calendar
 from fantasy_helper.categories import Category
 from fantasy_helper.db import models as m
@@ -54,7 +55,8 @@ class LeagueContext:
     rosters: list[RosterEntry]
     players: dict[int, Player]  # rostered players and the stored free-agent pool
     rates: dict[int, dict[str, float]]  # blended per-game rates
-    z: dict[int, PlayerZ]  # blended z-scores
+    z: dict[int, PlayerZ]  # blended z-scores, valued as G-scores
+    g_weights: dict[str, float]  # category -> G-score weight; {} means plain z-sum
     factors: dict[str, dict[str, float]]  # NBA team -> per-stat multiplier for its opponents
     dispersion: dict[str, float]
     schedule: dict[str, dict[int, str]]  # NBA team -> {scoring period: opponent}, today on
@@ -100,7 +102,7 @@ class LeagueContext:
             per_game=self.rates[player_id],
             games={d: self.factors.get(games[d], {}) for d in days if d in games},
             p_play=1.0 if healthy else p_play(p.injury_status),
-            priority=self.z[player_id].total,
+            priority=self.z[player_id].value,
         )
         today, live = self.scoring_period, self.live_games.get(p.pro_team)
         if today not in sim.games or live is None or live.state == "pre":
@@ -141,6 +143,8 @@ def load_context(session: Session, season: int) -> LeagueContext:
     game_stats = q.load_game_stats(session, season)
     live_stats = q.load_live_stats(session, season)
     completed = [g for g in game_stats if g.scoring_period in week.scoring_periods and g.scoring_period < today]
+    rostered_base = baselines([s for s in lines if s.player_id in rostered_ids], categories)
+    g_weights = gscore_weights(rostered_base, load_weekly_bounce(season), categories)
     return LeagueContext(
         season=season,
         categories=categories,
@@ -151,7 +155,8 @@ def load_context(session: Session, season: int) -> LeagueContext:
         rosters=rosters,
         players=q.load_players(session, rostered_ids | {s.player_id for s in lines}),
         rates={s.player_id: s.per_game for s in lines},
-        z=player_zscores(lines, categories, baseline_ids=rostered_ids),
+        z=player_zscores(lines, categories, baseline_ids=rostered_ids, weights=g_weights),
+        g_weights=g_weights,
         factors=opponent_factors(q.load_opponent_stats(session, season)),
         dispersion=fit_dispersion(game_stats, STAT_KEYS),
         schedule=q.load_schedule(session, season, range(today, last_day + 1)),

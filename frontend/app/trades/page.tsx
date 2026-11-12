@@ -126,8 +126,9 @@ function TradesView() {
           <ul className="assumptions">
             <li>
               Cats / week is the change in categories won per week against a league-average team; win a week is the
-              change in the chance of winning more categories than that team. A player&apos;s value is his z-score
-              total, the same as on the Team page.
+              change in the chance of winning more categories than that team. A player&apos;s value is his G-score, the
+              same as on the Team page: his z-scores summed, each weighted by how predictable that category is week to
+              week, so steals and the percentages count for less.
             </li>
             {t.assumptions.map((a) => (
               <li key={a}>{a}</li>
@@ -239,9 +240,9 @@ function Players({ players }: { players: Player[] }) {
         <div key={p.player_id}>
           <span className="player-name">{p.name}</span>
           <InjuryBadge status={p.injury_status} />
-          <span className="player-meta" title="z-score total">
+          <span className="player-meta" title="G-score value">
             {" "}
-            {p.pro_team} · value {p.z_total.toFixed(1)}
+            {p.pro_team} · value {p.value.toFixed(1)}
           </span>
         </div>
       ))}
@@ -368,8 +369,8 @@ function RosterPicker({ title, players, selected, onToggle }: PickerProps) {
                       {p.player.pro_team} · {p.player.position}
                     </div>
                   </td>
-                  <td className="num" title="z-score total">
-                    {p.z_total.toFixed(1)}
+                  <td className="num" title="G-score value">
+                    {p.value.toFixed(1)}
                   </td>
                 </tr>
               );

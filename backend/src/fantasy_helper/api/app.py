@@ -351,7 +351,7 @@ def _player(ctx: LeagueContext, pid: int | None, players: dict[int, Player] | No
         position=p.position,
         injury_status=p.injury_status,
         z=z.by_cat if z else {},
-        z_total=z.total if z else 0.0,
+        value=z.value if z else 0.0,
     )
 
 
@@ -450,7 +450,8 @@ MOVES_SHOWN = 20
 
 
 def _window(c: Ctx, ctx: LeagueContext, window: str) -> tuple[list[StatLine], dict[int, PlayerZ]]:
-    """Every player's averages over one window, and z-scores against rostered players."""
+    """Every player's averages over one window, and z-scores against rostered players, valued
+    with the model's G-score weights so every window weighs categories the same way."""
     if window == "model":
         games = {x.player_id: x for x in q.load_stat_lines(c.session, c.season, "projected")}
         games |= {x.player_id: x for x in q.load_stat_lines(c.session, c.season, "season")}
@@ -464,7 +465,8 @@ def _window(c: Ctx, ctx: LeagueContext, window: str) -> tuple[list[StatLine], di
     if window not in WINDOWS:
         raise ValueError(f"Unknown window {window!r}; one of {', '.join(WINDOWS)}")
     lines = q.load_stat_lines(c.session, c.season, window)
-    return lines, player_zscores(lines, ctx.categories, baseline_ids={r.player_id for r in ctx.rosters})
+    rostered = {r.player_id for r in ctx.rosters}
+    return lines, player_zscores(lines, ctx.categories, baseline_ids=rostered, weights=ctx.g_weights)
 
 
 @router.get("/team", response_model=s.TeamDetail)
@@ -483,7 +485,7 @@ def team(c: CtxDep, team_id: int | None = None, window: str = "model"):
 
     def order(r: RosterEntry) -> tuple[int, float]:
         rank = SLOT_ORDER.index(r.lineup_slot) if r.lineup_slot in SLOT_ORDER else len(SLOT_ORDER)
-        return rank, -(z[r.player_id].total if r.player_id in z else 0.0)
+        return rank, -(z[r.player_id].value if r.player_id in z else 0.0)
 
     players = []
     for r in sorted(entries, key=order):
@@ -499,7 +501,7 @@ def team(c: CtxDep, team_id: int | None = None, window: str = "model"):
                 mpg=line.mpg if line else None,
                 per_game=line.per_game if line else None,
                 z=by_cat,
-                z_total=pz.total if pz else 0.0,
+                value=pz.value if pz else 0.0,
                 specialties=specialties(by_cat),
             )
         )

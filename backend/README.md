@@ -62,6 +62,7 @@ When deployed, [`aws.py`](src/fantasy_helper/aws.py) holds both Lambda entry poi
 | [`predict.py`](src/fantasy_helper/predict.py) | This week's matchup odds; `fh-predict` |
 | [`waivers.py`](src/fantasy_helper/waivers.py) | Stream and hold rankings for one team; `fh-waivers` |
 | [`trades.py`](src/fantasy_helper/trades.py) | Trade evaluation, the trade finder and the season outlook for one team |
+| [`fit_bounce.py`](src/fantasy_helper/fit_bounce.py) | `fh-fit-bounce`: fit each category's weekly bounce from last season's ESPN game logs, for the G-score weights |
 | [`api/app.py`](src/fantasy_helper/api/app.py) | FastAPI routes; `fh-api` |
 | [`api/schemas.py`](src/fantasy_helper/api/schemas.py) | Response models, each from one team's side ("me" / "opp") |
 | [`aws.py`](src/fantasy_helper/aws.py) | Lambda entry points |
@@ -72,7 +73,7 @@ The method behind each number is in the module's docstring. Start there before c
 
 | Module | What it computes |
 |---|---|
-| [`zscores.py`](src/fantasy_helper/analytics/zscores.py) | Per-category player z-scores against a baseline pool (usually rostered players). FG%/FT% use volume-weighted impact, and TO is negated |
+| [`zscores.py`](src/fantasy_helper/analytics/zscores.py) | Per-category player z-scores against a baseline pool (usually rostered players). FG%/FT% use volume-weighted impact, and TO is negated. A player's value is his G-score: z weighted per category by the fitted weekly bounce |
 | [`rates.py`](src/fantasy_helper/analytics/rates.py) | Blended per-game rates: ESPN's projection shrunk toward season averages as games accumulate |
 | [`opponent.py`](src/fantasy_helper/analytics/opponent.py) | Per-stat multipliers for the NBA opponent a player faces, shrunk toward 1 early in the season |
 | [`variance.py`](src/fantasy_helper/analytics/variance.py) | Dispersion (variance / mean) per stat, fitted from box scores |
@@ -99,7 +100,7 @@ Matchup, lineup, waiver and trade views are from one team's side (`me` / `opp`, 
 | GET | `/api/matchups` | `period` | Every matchup's odds for a week | Matchup |
 | GET | `/api/matchup` | `team_id`, `period` | One matchup head to head: category odds, odds history | Matchup |
 | GET | `/api/lineup` | `team_id`, `period` | One team's week by player and day | Matchup (`DayLineup`) |
-| GET | `/api/team` | `team_id`, `window` | Roster with averages and z-scores, category profile, recent moves | Team, Trades |
+| GET | `/api/team` | `team_id`, `window` | Roster with averages, z-scores and G-score values, category profile, recent moves | Team, Trades |
 | GET | `/api/profiles` | `window` | Every team's category profile (the heatmap) | League |
 | GET | `/api/power` | | Power rankings and all-play records | League |
 | GET | `/api/trade` | `partner_id`, `give` (repeated), `get` (repeated), `team_id` | One deal scored for both sides | Trades |
@@ -121,7 +122,7 @@ To add an endpoint, add a response model to `api/schemas.py` and the route to `a
 
 ## Commands
 
-The five console scripts declared in [`pyproject.toml`](pyproject.toml); run each with `uv run`:
+The six console scripts declared in [`pyproject.toml`](pyproject.toml); run each with `uv run`:
 
 | Command | Flags | What it does |
 |---|---|---|
@@ -130,6 +131,7 @@ The five console scripts declared in [`pyproject.toml`](pyproject.toml); run eac
 | `fh-waivers` | `--team ID`, `--today`, `--sims N`, `--top N` | Print stream and hold rankings; `--today` assumes pickups can play today |
 | `fh-api` | `--host`, `--port`, `--reload` | Serve the API with uvicorn (default `127.0.0.1:8000`) |
 | `fh-copy-db` | `SOURCE_URL` | Copy every table from `SOURCE_URL` into the configured database, which must be empty and at the same migration |
+| `fh-fit-bounce` | `--season`, `--cache DIR`, `--pool N`, `--min-week-games N` | Fit the weekly bounce from a past season (default: last season) and write `data/weekly_bounce_<season>.json`. Run once per season; `--cache` keeps the ~560 ESPN responses for reruns |
 
 ## Configuration
 

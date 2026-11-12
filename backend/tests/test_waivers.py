@@ -139,7 +139,7 @@ def test_report_baseline_is_this_matchups_prediction(league):
 def test_default_drops_are_my_lowest_priority_players(league):
     _, ctx = league
     drops = default_drops(ctx, MY_TEAM)
-    mine = sorted((r.player_id for r in ctx.team_entries(MY_TEAM)), key=lambda pid: ctx.z[pid].total)
+    mine = sorted((r.player_id for r in ctx.team_entries(MY_TEAM)), key=lambda pid: ctx.z[pid].value)
     assert drops == mine[:3]  # full roster, so no open-spot option
 
 

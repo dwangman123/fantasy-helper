@@ -22,7 +22,9 @@ from fantasy_helper.db import queries as q
 from fantasy_helper.db.session import get_sessionmaker
 from fantasy_helper.domain import Matchup
 
-MODEL_VERSION = "2"  # 2: common random numbers (inverse-CDF team totals, per player-game availability)
+# 2: common random numbers (inverse-CDF team totals, per player-game availability)
+# 3: start priority by G-score value instead of the z-sum
+MODEL_VERSION = "3"
 N_SIMS = 5000
 
 
