@@ -3,6 +3,7 @@
 No network access here, so everything is unit-testable with fakes.
 """
 
+from collections import Counter
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -65,7 +66,30 @@ def parse_stat_lines(p: Any, season: int) -> list[StatLine]:
     return lines
 
 
-def parse_team(t: Any) -> Team:
+def owner_names(teams: list[Any]) -> dict[int, str]:
+    """Each team's owner as the UI names them: the first owner's first name, capitalized, with a
+    last initial added where two owners share a first name. A team without a named owner keeps its
+    team name. (ESPN's displayName is mostly an "ESPNFAN…" id, so it isn't used.)"""
+    named: dict[int, tuple[str, str]] = {}
+    for t in teams:
+        owners = getattr(t, "owners", None) or []
+        first = str(owners[0].get("firstName") or "").strip() if owners else ""
+        if first:
+            last = str(owners[0].get("lastName") or "").strip()
+            named[int(t.team_id)] = (first[:1].upper() + first[1:], last)
+    shared = Counter(first.lower() for first, _ in named.values())
+    names = {}
+    for t in teams:
+        team_id = int(t.team_id)
+        if team_id not in named:
+            names[team_id] = t.team_name.strip()
+            continue
+        first, last = named[team_id]
+        names[team_id] = f"{first} {last[:1].upper()}." if shared[first.lower()] > 1 and last else first
+    return names
+
+
+def parse_team(t: Any, owner: str) -> Team:
     return Team(
         team_id=int(t.team_id),
         name=t.team_name.strip(),
@@ -73,6 +97,7 @@ def parse_team(t: Any) -> Team:
         wins=int(t.wins),
         losses=int(t.losses),
         ties=int(getattr(t, "ties", 0) or 0),
+        owner=owner,
     )
 
 

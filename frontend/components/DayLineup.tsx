@@ -80,7 +80,7 @@ export function DayLineup({ categories, left, right, period }: Props) {
             </li>
             <li>
               {PARTS[key] ? `${key} shows makes/attempts. ` : ""}The win odds above assume the best lineup from here on,
-              so these totals can differ from the Final column.
+              so these totals can differ from the Projected column.
             </li>
           </>
         ) : (
@@ -128,7 +128,7 @@ function DaySide({ team, data, day, isToday, statKey, side }: SideProps) {
     <div className={`day-side ${side}`}>
       <div className="day-side-head">
         <span className="key" style={{ background: side === "left" ? "var(--win)" : "var(--loss)" }} />
-        <strong>{team.name}</strong>
+        <strong>{team.owner}</strong>
       </div>
       {playing.length === 0 ? (
         <div className="sub">No games this day.</div>

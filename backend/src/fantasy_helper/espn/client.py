@@ -163,6 +163,7 @@ def fetch_snapshot(
         live_games = parse.estimate_live_games(parse.tips(list(all_players.values()), today), datetime.now(UTC))
         warnings.append(f"NBA scoreboard unavailable, estimating today's games from tip times: {exc!r}")
 
+    owners = parse.owner_names(league.teams)
     return LeagueSnapshot(
         league_id=settings.league_id,
         season=settings.season,
@@ -170,7 +171,7 @@ def fetch_snapshot(
         categories=categories,
         current_matchup_period=int(league.currentMatchupPeriod),
         current_scoring_period=int(league.scoringPeriodId),
-        teams=[parse.parse_team(t) for t in league.teams],
+        teams=[parse.parse_team(t, owners[int(t.team_id)]) for t in league.teams],
         players=[parse.parse_player(p) for p in all_players.values()],
         rosters=[
             replace(e, acquired_at=roster_days.acquired_at.get(e.player_id))

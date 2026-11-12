@@ -29,6 +29,7 @@ class TeamOut(BaseModel):
     wins: int
     losses: int
     ties: int
+    owner: str  # the owner's first name, which the UI shows in place of the team name
 
 
 class IngestOut(BaseModel):

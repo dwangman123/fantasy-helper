@@ -34,8 +34,8 @@ The five pages are client components. [`app/layout.tsx`](app/layout.tsx) wraps t
 
 | Route | Shows | Hooks | Main components |
 |---|---|---|---|
-| [`/matchup`](app/matchup/page.tsx) | Any matchup head to head: win odds, each category now and projected, the lineup day by day, odds over the week. An earlier week shows ESPN's final results | `useLeague`, `useMatchups`, `useMatchup`; `useLineup` (in `DayLineup`) | `MatchupSelect`, `CategoryH2H`, `DayLineup`, `OddsHistory`, `OddsBar`, `Tile` |
-| [`/team`](app/team/page.tsx) | A team's roster with per-game averages shaded by z-score, its category profile with ranks and punts, and recent moves | `useLeague`, `useTeam` | `TeamSelect`, `PlayerCell`, `ZShade` |
+| [`/matchup`](app/matchup/page.tsx) | The week's matchups as cards, then any one head to head: win odds, each category's current and projected totals, the lineup day by day, odds over the week. An earlier week shows ESPN's final results | `useLeague`, `useMatchups`, `useMatchup`; `useLineup` (in `DayLineup`) | `WeekStepper`, `MatchupStrip`, `CategoryH2H`, `DayLineup`, `OddsHistory`, `OddsBar`, `Tile` |
+| [`/team`](app/team/page.tsx) | A team's roster with per-game averages shaded by z-score, its category profile tinted by league rank, and recent moves | `useLeague`, `useTeam` | `TeamSelect`, `PlayerCell`, `ZShade` |
 | [`/league`](app/league/page.tsx) | Power rankings and the 10-team category heatmap | `useLeague`, `usePower`, `useProfiles` | `ZShade` |
 | [`/waivers`](app/waivers/page.tsx) | Category board, then free agents ranked two ways: stream (this week's odds) and hold (rest of season) | `useLeague`, `useWaivers` | `TeamSelect`, `LabelChip`, `OddsBar`, `DeltaBar`, `Effects`, `PlayerCell` |
 | [`/trades`](app/trades/page.tsx) | Deals found that help both teams, and a builder to score any deal of up to 3 players a side | `useLeague`, `useTrades`, `useTeam` (both rosters), `useTrade` | `TeamSelect`, `DeltaBar`, `Effects`, `PlayerCell` |
@@ -47,8 +47,8 @@ What's being viewed lives in the query string, so every view can be linked and r
 | Param | Pages | Hook | Default |
 |---|---|---|---|
 | `?team=7` | Team, Waivers, Trades | `useTeamParam` ([`TeamSelect.tsx`](components/TeamSelect.tsx)) | my team |
-| `?week=2` | Matchup | `useWeekParam` ([`MatchupSelect.tsx`](components/MatchupSelect.tsx)) | the current week |
-| `?matchup=12` | Matchup | `useMatchupParam` ([`MatchupSelect.tsx`](components/MatchupSelect.tsx)) | my matchup; changing the week clears it |
+| `?week=2` | Matchup | `useWeekParam` ([`MatchupPicker.tsx`](components/MatchupPicker.tsx)) | the current week |
+| `?matchup=12` | Matchup | `useMatchupParam` ([`MatchupPicker.tsx`](components/MatchupPicker.tsx)) | my matchup; changing the week clears it |
 | `?partner=7&give=1,2&get=3` | Trades | `useDeal` ([`app/trades/page.tsx`](app/trades/page.tsx)) | no deal; changing the team clears it |
 
 The four pages that read these params (Matchup, Team, Waivers, Trades) render their view inside `<Suspense>`. Follow that pattern in a new page.
@@ -60,8 +60,8 @@ The four pages that read these params (Matchup, Team, Waivers, Trades) render th
 | [`TopBar`](components/TopBar.tsx) | Nav, data time, Refresh button and the ingest-warnings banner |
 | [`RefreshButton`](components/RefreshButton.tsx) | Runs `useRefresh` and shows its error |
 | [`TeamSelect`](components/TeamSelect.tsx) | Team picker, plus `useTeamParam` |
-| [`MatchupSelect`](components/MatchupSelect.tsx) | Matchup and week pickers, `useWeekParam` / `useMatchupParam`, and `sides()`, which puts my team on the left (otherwise home) |
-| [`CategoryH2H`](components/CategoryH2H.tsx) | Each category head to head: totals now and projected on either side of its win / tie / loss bar |
+| [`MatchupPicker`](components/MatchupPicker.tsx) | `WeekStepper` (back and forward through the weeks) and `MatchupStrip` (a card per matchup with each side's win odds, or categories won once the week is over), `useWeekParam` / `useMatchupParam`, and `sides()`, which puts my team on the left (otherwise home) |
+| [`CategoryH2H`](components/CategoryH2H.tsx) | Each category head to head: current and projected totals on either side of its win / tie / loss bar, with the locked / swing status centered under it |
 | [`DayLineup`](components/DayLineup.tsx) | One day of the matchup: both teams' players in their ESPN slots with box scores, live lines or projections |
 | [`OddsHistory`](components/OddsHistory.tsx) | Both teams' win odds after each ingest, across the week (SVG) |
 | [`OddsBar`](components/OddsBar.tsx) | Win / tie / loss as one 100% bar, plus `OddsLegend` |
@@ -77,7 +77,8 @@ Formatting helpers are in [`lib/format.ts`](lib/format.ts): percentages, signed 
 
 ## Conventions
 
-- **One team's side.** Matchup, waiver and trade responses are from one team's point of view (`me` / `opp`, `me` / `partner`), so the UI never works out home or away. Blue (`--win`) is the viewed team's side and red (`--loss`) the other's. On the Matchup page the left team is mine when I'm in the matchup, otherwise the home team (`sides()` in `MatchupSelect.tsx`).
+- **One team's side.** Matchup, waiver and trade responses are from one team's point of view (`me` / `opp`, `me` / `partner`), so the UI never works out home or away. Blue (`--win`) is the viewed team's side and red (`--loss`) the other's. On the Matchup page the left team is mine when I'm in the matchup, otherwise the home team (`sides()` in `MatchupPicker.tsx`).
+- **Teams go by their owner.** Show `team.owner` (the owner's first name, from the backend's `owner_names()`), never the ESPN team name or abbreviation. A snapshot stored before owners were kept sends the team name there until the next ingest.
 - **Percentages come from makes and attempts.** FG% and FT% are computed from summed FGM/FGA and FTM/FTA, never averaged (`PARTS`, `totalValue` in `lib/format.ts`).
 - **Dates.** The API sends days as `YYYY-MM-DD`. Parse them as local days with the helpers in `lib/format.ts`, not with `new Date()`, which would read them as UTC midnight.
 - **Z-shading.** Two shades of blue from +0.5 and +1 SD, two of red from −0.5 and −1 SD, unshaded within half an SD of average ([`ZShade.tsx`](components/ZShade.tsx)).

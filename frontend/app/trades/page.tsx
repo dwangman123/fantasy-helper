@@ -86,7 +86,7 @@ function TradesView() {
     <div className={`stack${trades.isPlaceholderData ? " fetching" : ""}`}>
       <div className="row" style={{ justifyContent: "space-between" }}>
         <div>
-          <h1>Trades for {teams[teamId]?.name}</h1>
+          <h1>Trades for {teams[teamId]?.owner}</h1>
           {t && (
             <div className="sub">
               Rest of season, weeks {t.first_period}–{t.first_period + t.weeks - 1}, against a league-average team
@@ -148,7 +148,7 @@ function Finder({ trades, teams, onOpen }: { trades: Trades; teams: Record<numbe
   const shown = all ? deals : deals.slice(0, SHOWN);
   const max = Math.max(...trades.deals.map((d) => Math.abs(d.me.d_cats_per_week)), 0.001);
   const partners = [...new Set(trades.deals.map((d) => d.partner.team_id))].sort((a, b) =>
-    teams[a].name.localeCompare(teams[b].name),
+    teams[a].owner.localeCompare(teams[b].owner),
   );
   if (!trades.deals.length) return <p className="sub">No deal found that helps both teams.</p>;
   return (
@@ -166,7 +166,7 @@ function Finder({ trades, teams, onOpen }: { trades: Trades; teams: Record<numbe
             <option value="">every team</option>
             {partners.map((id) => (
               <option key={id} value={id}>
-                {teams[id].name}
+                {teams[id].owner}
               </option>
             ))}
           </select>
@@ -197,7 +197,7 @@ function Finder({ trades, teams, onOpen }: { trades: Trades; teams: Record<numbe
             {shown.map((d, i) => (
               <tr key={`${d.partner.team_id}-${d.me.sends.map((p) => p.player_id)}-${d.me.receives.map((p) => p.player_id)}`}>
                 <td className="sub">{i + 1}</td>
-                <td>{teams[d.partner.team_id]?.name}</td>
+                <td>{teams[d.partner.team_id]?.owner}</td>
                 <td>
                   <Players players={d.me.sends} />
                   <Moves side={d.me} />
@@ -273,7 +273,7 @@ function Evaluator({ teamId, partnerId, give, receive, teams, categories, onChan
   const mine = useTeam(teamId, "model");
   const theirs = useTeam(partnerId, "model");
   const trade = useTrade(teamId, partnerId, give, receive);
-  const names = Object.fromEntries(teams.map((t) => [t.team_id, t.name]));
+  const names = Object.fromEntries(teams.map((t) => [t.team_id, t.owner]));
   const toggle = (list: number[], id: number) =>
     list.includes(id) ? list.filter((x) => x !== id) : list.length < MAX_PER_SIDE ? [...list, id] : list;
   return (
@@ -294,7 +294,7 @@ function Evaluator({ teamId, partnerId, give, receive, teams, categories, onChan
               .filter((t) => t.team_id !== teamId)
               .map((t) => (
                 <option key={t.team_id} value={t.team_id}>
-                  {t.name}
+                  {t.owner}
                 </option>
               ))}
           </select>

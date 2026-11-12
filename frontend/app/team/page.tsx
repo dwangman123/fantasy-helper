@@ -41,9 +41,9 @@ function TeamView() {
     <div className={`stack${detail.isPlaceholderData ? " fetching" : ""}`}>
       <div className="row" style={{ justifyContent: "space-between" }}>
         <div>
-          <h1>{team.name}</h1>
+          <h1>{team.owner}</h1>
           <div className="sub">
-            {team.abbrev} · {team.wins}-{team.losses}
+            {team.wins}-{team.losses}
             {team.ties ? `-${team.ties}` : ""} · {d.punts.length ? `punting ${d.punts.join(", ")}` : "no clear punts"}
           </div>
         </div>
@@ -68,10 +68,20 @@ function TeamView() {
             <h2>Categories</h2>
             <div className="sub">Team per-game averages, ranked against the league</div>
           </div>
+          <div className="legend" style={{ alignItems: "center", gap: 8 }}>
+            <span>best</span>
+            <span className="rank-scale" aria-hidden />
+            <span>worst in the league</span>
+          </div>
         </div>
         <div className="board">
           {d.profile.map((p) => (
-            <ProfileTile key={p.key} p={p} isPercentage={categories.find((c) => c.key === p.key)?.is_percentage ?? false} />
+            <ProfileTile
+              key={p.key}
+              p={p}
+              teams={league.data.teams.length}
+              isPercentage={categories.find((c) => c.key === p.key)?.is_percentage ?? false}
+            />
           ))}
         </div>
       </section>
@@ -108,25 +118,25 @@ function TeamView() {
   );
 }
 
-function ProfileTile({ p, isPercentage }: { p: CategoryProfile; isPercentage: boolean }) {
-  const [text, color] = p.punt
-    ? ["punt", "var(--loss)"]
-    : p.rank <= 3
-      ? ["strength", "var(--win)"]
-      : [null, null];
+// A diverging tint by rank: deepest blue for the best team, fading to none mid-table, then red
+// down to the worst. 38% matches the strongest z-score shade (.z-hi2 / .z-lo2).
+function rankTint(rank: number, teams: number): string | undefined {
+  const mid = (teams + 1) / 2;
+  const t = teams > 1 ? (mid - rank) / (mid - 1) : 0;
+  if (t === 0) return undefined;
+  return `color-mix(in srgb, var(${t > 0 ? "--win" : "--loss"}) ${(Math.abs(t) * 38).toFixed(1)}%, transparent)`;
+}
+
+type TileProps = { p: CategoryProfile; teams: number; isPercentage: boolean };
+
+function ProfileTile({ p, teams, isPercentage }: TileProps) {
   return (
-    <div className="board-tile">
-      <div className="cat">
-        <span>{p.key}</span>
-        {text && (
-          <span className="chip" style={{ fontWeight: 400 }}>
-            <span className="dot" style={{ background: color ?? undefined }} />
-            {text}
-          </span>
-        )}
-      </div>
+    <div className="board-tile" style={{ background: rankTint(p.rank, teams) }}>
+      <div className="cat">{p.key}</div>
       <div className="tile-value">{isPercentage ? stat(p.value, true) : p.value.toFixed(1)}</div>
-      <span className="sub">rank {p.rank} of 10</span>
+      <span className="sub">
+        rank {p.rank} of {teams}
+      </span>
     </div>
   );
 }

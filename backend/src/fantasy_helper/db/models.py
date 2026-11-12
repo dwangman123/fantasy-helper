@@ -55,6 +55,7 @@ class Team(Base):
     wins: Mapped[int] = mapped_column(Integer)
     losses: Mapped[int] = mapped_column(Integer)
     ties: Mapped[int] = mapped_column(Integer)
+    owner: Mapped[str | None] = mapped_column(String(200))  # null until the first ingest that stores it
 
 
 class Player(Base):

@@ -56,6 +56,7 @@ class Team:
     wins: int
     losses: int
     ties: int
+    owner: str = ""  # what the UI calls the team: its owner's first name (parse.owner_names)
 
 
 @dataclass

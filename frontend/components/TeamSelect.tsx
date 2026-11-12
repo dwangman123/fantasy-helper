@@ -29,7 +29,7 @@ export function TeamSelect({ teams, value, myTeamId, onChange }: Props) {
       <select value={value} onChange={(e) => onChange(Number(e.target.value))}>
         {teams.map((t) => (
           <option key={t.team_id} value={t.team_id}>
-            {t.name}
+            {t.owner}
             {t.team_id === myTeamId ? " (mine)" : ""}
           </option>
         ))}

@@ -33,7 +33,8 @@ def load_categories(session: Session, season: int) -> list[Category]:
 
 def load_teams(session: Session, season: int) -> list[Team]:
     rows = session.scalars(select(m.Team).where(m.Team.season == season).order_by(m.Team.team_id))
-    return [Team(r.team_id, r.name, r.abbrev, r.wins, r.losses, r.ties) for r in rows]
+    # A snapshot stored before owners were kept names each team by its team name until the next ingest.
+    return [Team(r.team_id, r.name, r.abbrev, r.wins, r.losses, r.ties, r.owner or r.name) for r in rows]
 
 
 def load_rosters(session: Session, season: int) -> list[RosterEntry]:
