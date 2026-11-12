@@ -14,9 +14,9 @@ export function Effects({ deltas, gained = [], lost = [], threshold = 0.01, limi
       {keys.map((k) => {
         const d = deltas[k];
         const title = gained.includes(k)
-          ? `${k} turns in your favor`
+          ? `${k} turns in the team's favor`
           : lost.includes(k)
-            ? `${k} stops being in your favor`
+            ? `${k} stops being in the team's favor`
             : `${k} P(win) ${d >= 0 ? "+" : "−"}${Math.abs(d * 100).toFixed(1)} pts`;
         return (
           <span key={k} className={`chip${flipped.has(k) ? " strong" : ""}`} title={title}>

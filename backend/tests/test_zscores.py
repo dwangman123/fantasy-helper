@@ -2,9 +2,17 @@ import json
 
 import pytest
 
-from fantasy_helper.analytics.zscores import Baseline, WeeklyBounce, gscore_weights, load_weekly_bounce, player_zscores
+from fantasy_helper.analytics.zscores import (
+    Baseline,
+    WeeklyBounce,
+    game_baselines,
+    gscore_weights,
+    load_weekly_bounce,
+    player_zscores,
+    z_by_cat,
+)
 from fantasy_helper.categories import KNOWN_CATEGORIES
-from fantasy_helper.domain import STAT_KEYS, StatLine
+from fantasy_helper.domain import STAT_KEYS, PlayerGameStat, StatLine
 
 PTS, STL, TO, FG = KNOWN_CATEGORIES[0], KNOWN_CATEGORIES[2], KNOWN_CATEGORIES[11], KNOWN_CATEGORIES[19]
 
@@ -99,3 +107,20 @@ def test_bounce_comes_from_the_latest_earlier_season(tmp_path):
 def test_mixed_windows_are_rejected():
     with pytest.raises(ValueError, match="mix windows"):
         player_zscores([line(1), line(2, window="season")], [PTS])
+
+
+def game(minutes=30.0, **stats):
+    return PlayerGameStat(1, 1, "BOS", minutes, {k: 0.0 for k in STAT_KEYS} | stats)
+
+
+def test_game_scale_measures_single_games_and_skips_ones_not_played():
+    games = [game(PTS=10, FGM=2, FGA=5), game(PTS=30, FGM=8, FGA=15), game(minutes=0.0, PTS=0)]
+    base = game_baselines(games, [PTS, FG])
+    assert base["PTS"] == Baseline(20.0, 10.0, None)  # the 0-minute game is left out
+    assert base["FG%"].league_pct == pytest.approx(10 / 20)  # composite makes / attempts
+
+
+def test_a_line_at_the_mean_scores_zero_and_turnovers_are_reversed():
+    base = {"PTS": Baseline(20.0, 10.0), "TO": Baseline(2.0, 1.0), "FG%": Baseline(0.0, 0.0, 0.5)}
+    z = z_by_cat({k: 0.0 for k in STAT_KEYS} | {"PTS": 20.0, "TO": 3.0}, [PTS, TO, FG], base)
+    assert z == {"PTS": 0.0, "TO": -1.0, "FG%": 0.0}  # no FG% spread: 0, not a division by zero

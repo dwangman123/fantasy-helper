@@ -6,9 +6,9 @@ import { OddsBar } from "@/components/OddsBar";
 import type { MatchupSummary, Team, WeekSpan } from "@/lib/api";
 import { pct, shortDate } from "@/lib/format";
 
-// A matchup's left and right teams: mine on the left when I'm in it, otherwise home on the left.
-export function sides(m: MatchupSummary, myTeamId: number): [number, number] {
-  return m.away_team_id === myTeamId ? [m.away_team_id, m.home_team_id] : [m.home_team_id, m.away_team_id];
+// A matchup's left (blue) and right (red) teams: home on the left.
+export function sides(m: MatchupSummary): [number, number] {
+  return [m.home_team_id, m.away_team_id];
 }
 
 // The page's URL params, and a way to edit them in place.
@@ -25,7 +25,7 @@ function useParams(): [URLSearchParams, (edit: (next: URLSearchParams) => void) 
 }
 
 // The week being viewed lives in the URL (?week=2), defaulting to the current one. Changing
-// it drops ?matchup=, whose id belongs to one week, so the new week opens on mine.
+// it drops ?matchup=, whose id belongs to one week, so the new week opens on its first matchup.
 export function useWeekParam(current: number | undefined): [number | undefined, (week: number) => void] {
   const [params, update] = useParams();
   const fromUrl = Number(params.get("week"));
@@ -39,40 +39,36 @@ export function useWeekParam(current: number | undefined): [number | undefined, 
   return [valid ? fromUrl : current, setWeek];
 }
 
-// The matchup being viewed lives in the URL (?matchup=12), defaulting to mine.
-export function useMatchupParam(myMatchupId: number | undefined): [number | undefined, (id: number) => void] {
+// The matchup being viewed lives in the URL (?matchup=12), defaulting to the week's first.
+export function useMatchupParam(firstMatchupId: number | undefined): [number | undefined, (id: number) => void] {
   const [params, update] = useParams();
   const fromUrl = Number(params.get("matchup"));
-  const matchupId = Number.isInteger(fromUrl) && fromUrl > 0 ? fromUrl : myMatchupId;
+  const matchupId = Number.isInteger(fromUrl) && fromUrl > 0 ? fromUrl : firstMatchupId;
   const setMatchup = (id: number) =>
     update((next) => {
-      if (id === myMatchupId) next.delete("matchup");
+      if (id === firstMatchupId) next.delete("matchup");
       else next.set("matchup", String(id));
     });
   return [matchupId, setMatchup];
 }
 
-// One button per matchup in the week, mine first: each side's owner and chance to win, or, for
-// a finished week, the categories each side won.
+// One button per matchup in the week: each side's owner and chance to win, or, for a finished
+// week, the categories each side won. Key squares tie each name to its end of the bar.
 type StripProps = {
   rows: MatchupSummary[];
   teams: Record<number, Team>;
   categories: number;
   value: number;
-  myTeamId: number;
   onChange: (id: number) => void;
 };
 
-export function MatchupStrip({ rows, teams, categories, value, myTeamId, onChange }: StripProps) {
-  const mine = (r: MatchupSummary) => r.home_team_id === myTeamId || r.away_team_id === myTeamId;
-  const ordered = [...rows].sort((a, b) => Number(mine(b)) - Number(mine(a)));
+export function MatchupStrip({ rows, teams, categories, value, onChange }: StripProps) {
   return (
     <div className="matchup-strip" role="group" aria-label="Matchup">
-      {ordered.map((r) => {
-        const [leftId, rightId] = sides(r, myTeamId);
-        const homeLeft = leftId === r.home_team_id;
-        const [winL, winR] = homeLeft ? [r.p_home, r.p_away] : [r.p_away, r.p_home];
-        const [catsL, catsR] = homeLeft ? [r.expected_home, r.expected_away] : [r.expected_away, r.expected_home];
+      {rows.map((r) => {
+        const [leftId, rightId] = sides(r);
+        const [winL, winR] = [r.p_home, r.p_away];
+        const [catsL, catsR] = [r.expected_home, r.expected_away];
         // A finished week's odds are its result, so it shows (and shades) categories won instead.
         const [l, rt] = r.final ? [catsL, catsR] : [winL, winR];
         const tie = r.final ? Math.max(categories - catsL - catsR, 0) / categories : r.p_tie;
@@ -88,11 +84,17 @@ export function MatchupStrip({ rows, teams, categories, value, myTeamId, onChang
             onClick={() => onChange(r.espn_id)}
           >
             <span className="matchup-line">
-              <span>{left}</span>
+              <span>
+                <span className="key" style={{ background: "var(--win)" }} />
+                {left}
+              </span>
               <span className={l >= rt ? "lead" : "trail"}>{show(l)}</span>
             </span>
             <span className="matchup-line">
-              <span>{right}</span>
+              <span>
+                <span className="key" style={{ background: "var(--loss)" }} />
+                {right}
+              </span>
               <span className={rt > l ? "lead" : "trail"}>{show(rt)}</span>
             </span>
             <OddsBar

@@ -20,8 +20,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from fantasy_helper.analytics.actuals import category_results, category_values
-from fantasy_helper.analytics.daily_lineup import SLOT_ORDER, team_week
-from fantasy_helper.analytics.power import all_play_records, power_rankings
+from fantasy_helper.analytics.daily_lineup import SLOT_ORDER, DayCell, team_week
+from fantasy_helper.analytics.power import (
+    Record,
+    all_play_records,
+    power_rankings,
+    projected_records,
+    scheduled_odds,
+)
 from fantasy_helper.analytics.team_profile import DEFAULT_PUNT_Z, TeamProfile, team_profiles
 from fantasy_helper.analytics.trades import Season, TradeSide
 from fantasy_helper.analytics.waivers import category_board, side_view
@@ -392,6 +398,7 @@ def lineup(c: CtxDep, team_id: int | None = None, period: int | None = None):
             if pid in players and players[pid].pro_team in ctx.live_games
         },
     )
+    rows = [(row, [_lineup_cell(ctx, x) for x in row.cells]) for row in week.players]
     return s.TeamLineup(
         team_id=team_id,
         matchup_period=period,
@@ -403,29 +410,40 @@ def lineup(c: CtxDep, team_id: int | None = None, period: int | None = None):
                 projected=week.day_projected[i],
                 starts=week.starts[i],
                 missed_starts=week.missed_starts[i],
+                actual_value=sum(c[i].value or 0.0 for _, c in rows if c[i].counts and c[i].actual),
+                projected_value=sum(c[i].projected_value or 0.0 for _, c in rows if c[i].counts),
             )
             for i, day in enumerate(days)
         ],
         players=[
             s.LineupPlayer(
                 player=_player(ctx, row.player_id, players),
-                cells=[
-                    s.LineupCell(
-                        slot=x.slot,
-                        opponent=x.opponent,
-                        counts=x.counts,
-                        actual=x.actual,
-                        stats=x.stats,
-                        projected=x.projected,
-                        game=_game(x.game),
-                    )
-                    for x in row.cells
-                ],
+                cells=cells,
                 totals=row.totals,
+                usual=sum(ctx.game_value(ctx.rates[row.player_id]).values()) if row.player_id in ctx.rates else None,
             )
-            for row in week.players
+            for row, cells in rows
         ],
         totals=week.totals,
+        value_scale=s.ValueScale(mean=ctx.game_scale[0], sd=ctx.game_scale[1]),
+    )
+
+
+def _lineup_cell(ctx: LeagueContext, x: DayCell) -> s.LineupCell:
+    """A lineup cell, with its game valued on the single-game scale when he has one."""
+    has_game = x.slot is not None and x.opponent is not None
+    by_cat = ctx.game_value(x.stats) if has_game else None
+    return s.LineupCell(
+        slot=x.slot,
+        opponent=x.opponent,
+        counts=x.counts,
+        actual=x.actual,
+        stats=x.stats,
+        projected=x.projected,
+        game=_game(x.game),
+        value=sum(by_cat.values()) if by_cat is not None else None,
+        projected_value=sum(ctx.game_value(x.projected).values()) if has_game else None,
+        value_by_cat=by_cat,
     )
 
 
@@ -506,10 +524,18 @@ def team(c: CtxDep, team_id: int | None = None, window: str = "model"):
             )
         )
     moves = [
-        s.MoveOut(at=x.at, type=x.type, kind=x.kind, player_id=x.player_id, player_name=x.player_name)
+        s.MoveOut(
+            transaction_id=x.transaction_id,
+            at=x.at,
+            type=x.type,
+            kind=x.kind,
+            player_id=x.player_id,
+            player_name=x.player_name,
+        )
         for x in q.load_moves(c.session, c.season, team_id, MOVES_SHOWN)
     ] + [
         s.MoveOut(
+            transaction_id=None,
             at=r.acquired_at,
             type="TRADE",
             kind="TRADE",
@@ -529,6 +555,13 @@ def team(c: CtxDep, team_id: int | None = None, window: str = "model"):
         players=players,
         moves=moves[:MOVES_SHOWN],
         notes=[
+            "Value is a G-score. Each category's z-score is (his per-game average − the rostered players' average) "
+            "÷ their spread, with FG% and FT% scored by volume (makes − league% × attempts) and TO reversed. Each z "
+            "is multiplied by 1/√(1 + τ²/σ²), where σ² is how much rostered players' averages differ in that "
+            "category and τ² is how much a player's per-game average bounces from week to week (fitted on last "
+            "season). The weights are scaled to average 1, then the nine weighted z-scores are added up. A "
+            "category that bounces a lot counts for less, since an edge there is more often luck in a single "
+            "week: steals most, then FG% and FT%.",
             "Team values are the sum of the roster's per-game averages (IR excluded); FG% and FT% come from "
             "summed makes and attempts.",
             f"A punt is a category where the team sits more than {-DEFAULT_PUNT_Z:g} standard deviations below "
@@ -537,6 +570,12 @@ def team(c: CtxDep, team_id: int | None = None, window: str = "model"):
             "average rostered player in.",
             "Trades show the players this team received and still has; ESPN lists trades without their players "
             "unless signed in.",
+        ],
+        sources=[
+            s.SourceOut(
+                label="Rosenof (2023), arXiv:2307.02188, where the G-score is defined",
+                url="https://arxiv.org/abs/2307.02188",
+            )
         ],
     )
 
@@ -590,6 +629,23 @@ def power(c: CtxDep):
     punts = {t: p.punts for t, p in team_profiles(ctx.rosters, lines, ctx.categories).items()}
     teams = {t.team_id: t for t in q.load_teams(c.session, c.season)}
     later = ctx.later_weeks
+    # Expected results still to play in the regular season: this week from its simulation,
+    # later weeks against each team's scheduled opponent from the same weekly totals as strength.
+    games = [(mu.home_team_id, mu.away_team_id, p.p_home, p.p_tie) for mu, p in c.week().results]
+    for i, week in enumerate(later):
+        if week.playoff:
+            continue
+        for mu in q.load_matchups(c.session, c.season, week.matchup_period):
+            home, away = mu.home_team_id, mu.away_team_id
+            if away is None or home not in outlook.weekly or away not in outlook.weekly:
+                continue
+            odds = scheduled_odds(
+                outlook.weekly[home][i : i + 1], outlook.weekly[away][i : i + 1], ctx.categories, ctx.dispersion
+            )
+            games.append((home, away, *odds))
+    so_far = {t.team_id: Record(t.wins, t.losses, t.ties) for t in teams.values()}
+    projected = projected_records(so_far, games)
+    regular = [w for w in ctx.calendar.weeks if not w.playoff]
     return s.PowerOut(
         weeks=len(later),
         first_period=later[0].matchup_period,
@@ -603,6 +659,7 @@ def power(c: CtxDep):
                 cat_p_win=r.cat_p_win,
                 all_play=s.RecordOut(**vars(r.all_play)),
                 punts=punts.get(r.team_id, []),
+                projected=s.ProjectedRecord(**vars(projected[r.team_id])),
             )
             for r in rows
         ],
@@ -612,8 +669,12 @@ def power(c: CtxDep):
             "are now and everyone healthy; a tied week counts half.",
             "Strength counts each team's NBA schedule and the daily lineup cap, so it can disagree with the per-game "
             "heatmap. Winning a week treats the nine categories as independent.",
-            "All-play so far compares each completed week's totals with every other team's that week, so it doesn't "
-            "depend on who a team happened to play.",
+            f"Projected record is the record so far plus each team's expected results in the rest of the regular "
+            f"season (through week {regular[-1].matchup_period}) against its scheduled opponents: this week from its "
+            "simulation, later weeks from the same rest-of-season totals as strength. A tied week counts as a tie.",
+            "Vs everyone so far is the record a team would have if it had played all nine other teams every "
+            "completed week: each week's category totals against every other team's that week. 22-5 means it would "
+            "have won 22 of those 27 matchups, so it shows how good a team's weeks were regardless of who it drew.",
         ],
     )
 

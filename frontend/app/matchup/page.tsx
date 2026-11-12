@@ -27,15 +27,14 @@ function Matchup() {
   // An earlier week to show; undefined while it's the current one.
   const past = week !== current ? week : undefined;
   const scoreboard = useMatchups(past, league.data !== undefined);
-  const myId = league.data?.my_team_id;
-  const mine = scoreboard.data?.find((r) => r.home_team_id === myId || r.away_team_id === myId);
-  const [matchupId, setMatchup] = useMatchupParam(mine?.espn_id);
-  const row = scoreboard.data?.find((r) => r.espn_id === matchupId) ?? mine ?? scoreboard.data?.[0];
-  const [leftId, rightId] = row && myId !== undefined ? sides(row, myId) : [undefined, undefined];
+  const opening = scoreboard.data?.[0];
+  const [matchupId, setMatchup] = useMatchupParam(opening?.espn_id);
+  const row = scoreboard.data?.find((r) => r.espn_id === matchupId) ?? opening;
+  const [leftId, rightId] = row ? sides(row) : [undefined, undefined];
   const detail = useMatchup(leftId, past);
   const error = league.error ?? scoreboard.error ?? detail.error;
   if (error) return <ErrorNotice error={error} />;
-  if (!league.data || !scoreboard.data || !row || !detail.data || rightId === undefined || myId === undefined)
+  if (!league.data || !scoreboard.data || !row || !detail.data || rightId === undefined)
     return <Loading what="matchup" />;
 
   const d = detail.data;
@@ -56,7 +55,6 @@ function Matchup() {
           teams={teams}
           categories={league.data.categories.length}
           value={row.espn_id}
-          myTeamId={myId}
           onChange={setMatchup}
         />
       </div>
@@ -78,7 +76,7 @@ function Matchup() {
         <CategoryH2H rows={d.categories} left={left} right={right} final={d.final} />
       </section>
 
-      <DayLineup key={d.espn_id} categories={league.data.categories} left={left} right={right} period={past} />
+      <DayLineup key={d.espn_id} left={left} right={right} period={past} />
 
       <section className="card">
         <div className="card-head">

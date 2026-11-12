@@ -475,6 +475,20 @@ tr.selected td {
   flex-direction: row-reverse;
 }
 
+/* A game's one-number value, shaded by zClass against a typical game. */
+.day-table td.value.zcell {
+  border-radius: 4px;
+  min-width: 72px;
+}
+
+.day-table .drivers {
+  margin-top: 4px;
+}
+
+.day-side.right .drivers {
+  justify-content: flex-end;
+}
+
 .day-side .idle {
   margin-top: 6px;
 }
@@ -894,6 +908,17 @@ details summary {
 .heatmap td.zcell {
   border-radius: 4px;
   border: 2px solid var(--surface);
+}
+
+a.info {
+  display: inline-flex;
+  margin-left: 4px;
+  vertical-align: -2px;
+  color: var(--ink-2);
+}
+
+a.info:hover {
+  color: var(--ink);
 }
 
 .team-link {

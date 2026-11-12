@@ -26,7 +26,7 @@ export default function LeaguePage() {
   if (error) return <ErrorNotice error={error} />;
   if (!league.data) return <Loading what="league" />;
 
-  const { my_team_id: myTeamId, categories } = league.data;
+  const { categories } = league.data;
   const p = power.data;
   const last = p ? p.first_period + p.weeks - 1 : null;
   return (
@@ -47,7 +47,7 @@ export default function LeaguePage() {
             </div>
           </div>
         </div>
-        {p ? <PowerTable power={p} myTeamId={myTeamId} /> : <Loading what="power rankings" />}
+        {p ? <PowerTable power={p} /> : <Loading what="power rankings" />}
       </section>
 
       <section className="card">
@@ -76,7 +76,6 @@ export default function LeaguePage() {
               teams={profiles.data.teams}
               categories={categories}
               order={p?.rows.map((r) => r.team.team_id)}
-              myTeamId={myTeamId}
             />
           </div>
         ) : (
@@ -98,16 +97,21 @@ export default function LeaguePage() {
 
 const record = (r: WinLoss) => `${r.wins}-${r.losses}${r.ties ? `-${r.ties}` : ""}`;
 
-function TeamName({ id, name, myTeamId }: { id: number; name: string; myTeamId: number }) {
+// A projected record: expected wins, losses and ties rounded to whole weeks.
+const projectedRecord = (r: WinLoss) => {
+  const ties = Math.round(r.ties);
+  return `${Math.round(r.wins)}-${Math.round(r.losses)}${ties ? `-${ties}` : ""}`;
+};
+
+function TeamName({ id, name }: { id: number; name: string }) {
   return (
-    <Link href={id === myTeamId ? "/team" : `/team?team=${id}`} className="player-name team-link">
+    <Link href={`/team?team=${id}`} className="player-name team-link">
       {name}
-      {id === myTeamId && <span className="player-meta"> (mine)</span>}
     </Link>
   );
 }
 
-function PowerTable({ power, myTeamId }: { power: Power; myTeamId: number }) {
+function PowerTable({ power }: { power: Power }) {
   const played = power.completed_weeks > 0;
   return (
     <div className="table-wrap">
@@ -119,21 +123,23 @@ function PowerTable({ power, myTeamId }: { power: Power; myTeamId: number }) {
             <th className="num" title="expected share of weekly matchups won against every other team">
               Strength
             </th>
-            <th className="num hide-sm" title="expected categories won per week, averaged over the other teams">
-              Cats / week
+            <th className="num" title="the record so far plus expected results against the scheduled opponents left">
+              Projected record
             </th>
-            <th className="num" title="each completed week against every other team">
-              All-play so far
+            <th
+              className="num hide-sm"
+              title="the record a team would have if it had played all nine other teams every completed week"
+            >
+              Vs everyone so far
             </th>
-            <th className="hide-sm">Punts</th>
           </tr>
         </thead>
         <tbody>
           {power.rows.map((r) => (
-            <tr key={r.team.team_id} className={r.team.team_id === myTeamId ? "selected" : undefined}>
+            <tr key={r.team.team_id}>
               <td className="sub">{r.rank}</td>
               <td>
-                <TeamName id={r.team.team_id} name={r.team.owner} myTeamId={myTeamId} />
+                <TeamName id={r.team.team_id} name={r.team.owner} />
                 <div className="player-meta">{record(r.team)}</div>
               </td>
               <td className="num">
@@ -144,8 +150,11 @@ function PowerTable({ power, myTeamId }: { power: Power; myTeamId: number }) {
                   </span>
                 </div>
               </td>
-              <td className="num hide-sm">{r.cats_per_week.toFixed(2)}</td>
               <td className="num">
+                {projectedRecord(r.projected)}
+                <div className="player-meta">{r.projected.wins.toFixed(1)} wins expected</div>
+              </td>
+              <td className="num hide-sm">
                 {played ? (
                   <>
                     {record(r.all_play)}
@@ -153,20 +162,6 @@ function PowerTable({ power, myTeamId }: { power: Power; myTeamId: number }) {
                   </>
                 ) : (
                   "–"
-                )}
-              </td>
-              <td className="hide-sm">
-                {r.punts.length ? (
-                  <div className="effects">
-                    {r.punts.map((k) => (
-                      <span key={k} className="chip">
-                        <span className="dot" style={{ background: "var(--loss)" }} />
-                        {k}
-                      </span>
-                    ))}
-                  </div>
-                ) : (
-                  <span className="player-meta">–</span>
                 )}
               </td>
             </tr>
@@ -182,9 +177,9 @@ const allPlayShare = (r: WinLoss) => {
   return games ? (r.wins + r.ties / 2) / games : 0;
 };
 
-type HeatmapProps = { teams: TeamProfile[]; categories: Category[]; order?: number[]; myTeamId: number };
+type HeatmapProps = { teams: TeamProfile[]; categories: Category[]; order?: number[] };
 
-function Heatmap({ teams, categories, order, myTeamId }: HeatmapProps) {
+function Heatmap({ teams, categories, order }: HeatmapProps) {
   const rank = (id: number) => order?.indexOf(id) ?? -1;
   const rows = [...teams].sort((a, b) =>
     order ? rank(a.team.team_id) - rank(b.team.team_id) : a.team.owner.localeCompare(b.team.owner),
@@ -206,9 +201,9 @@ function Heatmap({ teams, categories, order, myTeamId }: HeatmapProps) {
           {rows.map((t) => {
             const byKey = Object.fromEntries(t.profile.map((p) => [p.key, p]));
             return (
-              <tr key={t.team.team_id} className={t.team.team_id === myTeamId ? "selected" : undefined}>
+              <tr key={t.team.team_id}>
                 <td>
-                  <TeamName id={t.team.team_id} name={t.team.owner} myTeamId={myTeamId} />
+                  <TeamName id={t.team.team_id} name={t.team.owner} />
                 </td>
                 {categories.map((c) => (
                   <HeatCell key={c.key} team={t.team.owner} p={byKey[c.key]} category={c} teams={teams.length} />

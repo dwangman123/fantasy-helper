@@ -1,7 +1,14 @@
 import numpy as np
 import pytest
 
-from fantasy_helper.analytics.power import Record, all_play_records, matchup_outcome, power_rankings
+from fantasy_helper.analytics.power import (
+    Record,
+    all_play_records,
+    matchup_outcome,
+    power_rankings,
+    projected_records,
+    scheduled_odds,
+)
 from fantasy_helper.categories import KNOWN_CATEGORIES
 from fantasy_helper.domain import STAT_KEYS, Matchup
 
@@ -47,3 +54,18 @@ def test_stronger_rosters_rank_higher_and_equal_ones_split():
     assert best.strength == pytest.approx(0.75, abs=0.01)
     assert others[0].strength == pytest.approx(others[1].strength) == pytest.approx((0.5 + 0.25) / 2, abs=0.01)
     assert best.cat_p_win["STL"] == pytest.approx(0.5) and 1.4 < best.cats_per_week < 1.6
+
+
+def test_projected_record_adds_expected_results_to_the_record_so_far():
+    so_far = {1: Record(3, 0, 0), 2: Record(0, 3, 0)}
+    games = [(1, 2, 0.7, 0.1), (2, 1, 0.5, 0.0)]  # team 1 home, then away
+    proj = projected_records(so_far, games)
+    assert proj[1].wins == pytest.approx(3 + 0.7 + 0.5) and proj[1].losses == pytest.approx(0.2 + 0.5)
+    assert proj[1].ties == pytest.approx(0.1) and proj[2].ties == pytest.approx(0.1)
+    assert proj[2].wins == pytest.approx(0.2 + 0.5)
+    assert sum(vars(proj[1]).values()) == pytest.approx(5)  # 3 played plus 2 to play
+
+
+def test_scheduled_odds_favors_the_stronger_week():
+    win, tie = scheduled_odds(weeks(600)[:1], weeks(400)[:1], CATS, {k: 1.0 for k in STAT_KEYS})
+    assert win > 0.5 and 0 <= tie < 1

@@ -75,6 +75,36 @@ class PowerRow:
     all_play: Record = field(default_factory=Record)  # so far, over completed weeks
 
 
+def scheduled_odds(
+    home: np.ndarray, away: np.ndarray, categories: list[Category], dispersion: dict[str, float]
+) -> tuple[float, float]:
+    """The home team's P(win) and P(tie) in one week, from both teams' expected totals
+    that week (1 x STAT_KEYS), the same way strength is computed."""
+    win, tie = week_odds(weekly_cat_p_win(home, away, categories, dispersion))
+    return float(win[0]), float(tie[0])
+
+
+@dataclass
+class Projection:
+    wins: float
+    losses: float
+    ties: float
+
+
+def projected_records(so_far: dict[int, Record], games: list[tuple[int, int, float, float]]) -> dict[int, Projection]:
+    """Each team's record so far plus its expected wins, losses and ties over `games`, the
+    matchups still to play: (home, away, P(home wins), P(tie))."""
+    out = {t: Projection(float(r.wins), float(r.losses), float(r.ties)) for t, r in so_far.items()}
+    for home, away, p_home, p_tie in games:
+        p_away = 1.0 - p_home - p_tie
+        for team, win, loss in ((home, p_home, p_away), (away, p_away, p_home)):
+            proj = out.setdefault(team, Projection(0.0, 0.0, 0.0))
+            proj.wins += win
+            proj.losses += loss
+            proj.ties += p_tie
+    return out
+
+
 def power_rankings(
     categories: list[Category],
     weekly: dict[int, np.ndarray],

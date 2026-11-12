@@ -27,7 +27,7 @@ from statistics import fmean, pstdev
 
 from fantasy_helper.calendar import DATA_DIR
 from fantasy_helper.categories import Category
-from fantasy_helper.domain import StatLine
+from fantasy_helper.domain import PlayerGameStat, StatLine
 
 
 @dataclass(frozen=True)
@@ -66,14 +66,37 @@ def pct(makes: float, attempts: float) -> float:
     return makes / attempts if attempts else 0.0
 
 
-def baselines(lines: list[StatLine], categories: list[Category]) -> dict[str, Baseline]:
+def _baselines(rows: list[dict[str, float]], categories: list[Category]) -> dict[str, Baseline]:
+    """Each category's mean and spread over `rows` (stat dicts); percentage cats against the
+    rows' composite makes / attempts."""
     out = {}
     for cat in categories:
         league_pct = None
         if cat.is_percentage:
-            league_pct = pct(sum(s.per_game[cat.makes] for s in lines), sum(s.per_game[cat.attempts] for s in lines))
-        values = [raw_value(s.per_game, cat, league_pct) for s in lines]
+            league_pct = pct(sum(r[cat.makes] for r in rows), sum(r[cat.attempts] for r in rows))
+        values = [raw_value(r, cat, league_pct) for r in rows]
         out[cat.key] = Baseline(fmean(values), pstdev(values), league_pct) if values else Baseline(0.0, 0.0, league_pct)
+    return out
+
+
+def baselines(lines: list[StatLine], categories: list[Category]) -> dict[str, Baseline]:
+    return _baselines([s.per_game for s in lines], categories)
+
+
+def game_baselines(games: list[PlayerGameStat], categories: list[Category]) -> dict[str, Baseline]:
+    """Each category's mean and spread over single games (box scores with minutes played),
+    the scale a one-game value is measured on. A game swings far more than a season
+    average, so this spread is wider than `baselines`' and an empty category costs less."""
+    return _baselines([g.stats for g in games if g.minutes > 0], categories)
+
+
+def z_by_cat(stats: dict[str, float], categories: list[Category], base: dict[str, Baseline]) -> dict[str, float]:
+    """One line's z per category against `base`; reversed cats (TO) negated so higher is better."""
+    out = {}
+    for cat in categories:
+        b = base[cat.key]
+        z = (raw_value(stats, cat, b.league_pct) - b.mean) / b.sd if b.sd else 0.0
+        out[cat.key] = -z if cat.reverse else z
     return out
 
 
@@ -97,15 +120,7 @@ def player_zscores(
         ids = set(baseline_ids)
         pool = [s for s in lines if s.player_id in ids]
     base = baselines(pool, categories)
-    out = {}
-    for s in lines:
-        by_cat = {}
-        for cat in categories:
-            b = base[cat.key]
-            z = (raw_value(s.per_game, cat, b.league_pct) - b.mean) / b.sd if b.sd else 0.0
-            by_cat[cat.key] = -z if cat.reverse else z
-        out[s.player_id] = PlayerZ(s.player_id, by_cat, weights or {})
-    return out
+    return {s.player_id: PlayerZ(s.player_id, z_by_cat(s.per_game, categories, base), weights or {}) for s in lines}
 
 
 def gscore_weights(

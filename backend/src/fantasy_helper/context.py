@@ -16,6 +16,7 @@ still to play projected; a free agent can't join a game already under way.
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from statistics import fmean, pstdev
 
 from sqlalchemy.orm import Session
 
@@ -24,7 +25,16 @@ from fantasy_helper.analytics.matchup import SimPlayer
 from fantasy_helper.analytics.opponent import opponent_factors
 from fantasy_helper.analytics.rates import blend_rates
 from fantasy_helper.analytics.variance import fit_dispersion
-from fantasy_helper.analytics.zscores import PlayerZ, baselines, gscore_weights, load_weekly_bounce, player_zscores
+from fantasy_helper.analytics.zscores import (
+    Baseline,
+    PlayerZ,
+    baselines,
+    game_baselines,
+    gscore_weights,
+    load_weekly_bounce,
+    player_zscores,
+    z_by_cat,
+)
 from fantasy_helper.calendar import MatchupCalendar, MatchupWeek, load_calendar
 from fantasy_helper.categories import Category
 from fantasy_helper.db import models as m
@@ -64,6 +74,12 @@ class LeagueContext:
     live_games: dict[str, LiveGame]  # NBA team -> its game today
     live_stats: dict[int, PlayerGameStat]  # player -> his line so far today
     today_slots: dict[int, str]  # player -> set lineup slot today
+    game_base: dict[str, Baseline]  # single-game scale per category (`zscores.game_baselines`)
+    game_scale: tuple[float, float]  # mean and sd of one game's value, over rostered players' games
+
+    def game_value(self, stats: dict[str, float]) -> dict[str, float]:
+        """One line's value per category on the single-game scale; the game's value is the sum."""
+        return z_by_cat(stats, self.categories, self.game_base)
 
     @property
     def matchup_period(self) -> int:
@@ -145,6 +161,10 @@ def load_context(session: Session, season: int) -> LeagueContext:
     completed = [g for g in game_stats if g.scoring_period in week.scoring_periods and g.scoring_period < today]
     rostered_base = baselines([s for s in lines if s.player_id in rostered_ids], categories)
     g_weights = gscore_weights(rostered_base, load_weekly_bounce(season), categories)
+    rostered_games = [g for g in game_stats if g.player_id in rostered_ids and g.minutes > 0]
+    game_base = game_baselines(rostered_games, categories)
+    game_values = [sum(z_by_cat(g.stats, categories, game_base).values()) for g in rostered_games]
+    game_scale = (fmean(game_values), pstdev(game_values)) if game_values else (0.0, 0.0)
     return LeagueContext(
         season=season,
         categories=categories,
@@ -164,4 +184,6 @@ def load_context(session: Session, season: int) -> LeagueContext:
         live_games=q.load_live_games(session, season),
         live_stats={g.player_id: g for g in live_stats},
         today_slots=q.load_day_slots(session, season, today),
+        game_base=game_base,
+        game_scale=game_scale,
     )

@@ -4,23 +4,29 @@ import { useState } from "react";
 
 import { InjuryBadge } from "@/components/PlayerCell";
 import { ErrorNotice, Loading } from "@/components/Status";
-import { type Category, type LineupCell, type Player, type Team, type TeamLineup, useLineup } from "@/lib/api";
-import { PARTS, lineValue, num, timeOfDay, totalValue, weekday } from "@/lib/format";
+import { ZLegend, zClass } from "@/components/ZShade";
+import { type LineupCell, type Player, type Stats, type Team, type TeamLineup, useLineup } from "@/lib/api";
+import { signed, timeOfDay, weekday } from "@/lib/format";
 
 // ESPN's lineup order: starters first, then bench and IR.
 const SLOT_ORDER = ["PG", "SG", "SF", "PF", "C", "G", "F", "UT", "BE", "IR"];
 const slotRank = (slot: string | null) => (slot && SLOT_ORDER.includes(slot) ? SLOT_ORDER.indexOf(slot) : SLOT_ORDER.length);
 
+type Scale = TeamLineup["value_scale"];
+
+// A value to one decimal, signed, without a "−0.0".
+const val = (x: number) => signed(Math.round(x * 10) / 10 || 0, 1);
+
 // `period` is an earlier week to show; undefined is the current one.
-type Props = { categories: Category[]; left: Team; right: Team; period?: number };
+type Props = { left: Team; right: Team; period?: number };
 
 // One day of the matchup at a time: each team's players with a game that day, in the lineup
-// set on ESPN, with box scores for days played, live lines today and projections ahead.
-export function DayLineup({ categories, left, right, period }: Props) {
+// set on ESPN, each game as one fantasy value (box score for days played, live line today,
+// projection ahead), shaded against a typical game.
+export function DayLineup({ left, right, period }: Props) {
   const leftLineup = useLineup(left.team_id, period);
   const rightLineup = useLineup(right.team_id, period);
   const [picked, setPicked] = useState<number | null>(null);
-  const [key, setKey] = useState("PTS");
   const days = leftLineup.data?.days ?? rightLineup.data?.days ?? [];
   const today = days.findIndex((d) => !d.played);
   const day = picked ?? (today === -1 ? days.length - 1 : today);
@@ -32,18 +38,9 @@ export function DayLineup({ categories, left, right, period }: Props) {
       <div className="card-head">
         <div>
           <h2>Lineup by day</h2>
-          <div className="sub">Players with a game, in the lineup set on ESPN</div>
+          <div className="sub">Each game as one fantasy value, in the lineup set on ESPN</div>
         </div>
-        <label className="toggle">
-          Stat
-          <select value={key} onChange={(e) => setKey(e.target.value)}>
-            {categories.map((c) => (
-              <option key={c.key} value={c.key}>
-                {c.key}
-              </option>
-            ))}
-          </select>
-        </label>
+        <ZLegend />
       </div>
       {days.length > 0 && (
         <div className="segmented day-tabs" role="group" aria-label="Day">
@@ -67,49 +64,32 @@ export function DayLineup({ categories, left, right, period }: Props) {
         <Loading what="lineups" />
       ) : (
         <div className={`day-h2h${fetching ? " fetching" : ""}`}>
-          <DaySide team={left} data={leftLineup.data} day={day} isToday={day === today} statKey={key} side="left" />
-          <DaySide team={right} data={rightLineup.data} day={day} isToday={day === today} statKey={key} side="right" />
+          <DaySide team={left} data={leftLineup.data} day={day} isToday={day === today} side="left" />
+          <DaySide team={right} data={rightLineup.data} day={day} isToday={day === today} side="right" />
         </div>
       )}
       <ul className="assumptions" style={{ marginTop: 16 }}>
-        {period === undefined ? (
-          <>
-            <li>
-              <strong>Bold</strong>: box score (today: the line so far). Regular: projected (per-game rate × opponent ×
-              chance of playing). <s>Struck through</s>: a game on the bench, which doesn&apos;t count.
-            </li>
-            <li>
-              {PARTS[key] ? `${key} shows makes/attempts. ` : ""}The win odds above assume the best lineup from here on,
-              so these totals can differ from the Projected column.
-            </li>
-          </>
-        ) : (
-          <>
-            <li>
-              Box scores in the slot each player held that day. <s>Struck through</s>: a game on the bench, which
-              didn&apos;t count. {PARTS[key] ? `${key} shows makes/attempts.` : ""}
-            </li>
-            <li>
-              These are the box scores stored when each day was fetched, so ESPN&apos;s later stat corrections can leave
-              a day&apos;s total a stat or two off. The categories above are ESPN&apos;s final totals.
-            </li>
-          </>
-        )}
+        <li>
+          A game&apos;s value adds up its z-scores, each against how much single games by rostered players vary this
+          season, so an empty category costs about one point, not several. FG% and FT% count by volume, and fewer
+          turnovers is better. &quot;usual&quot; is his per-game averages scored the same way: what his games average
+          out to.
+        </li>
+        <li>
+          Shading compares the game with a typical rostered game. The chips are the two categories that moved it most.
+          {period === undefined
+            ? " Bold: box score (today: the line so far). Regular: projected (per-game rate × opponent × chance of playing)."
+            : " Box scores are the ones stored when each day was fetched, so ESPN's later stat corrections can leave one a stat off."}{" "}
+          <s>Struck through</s>: a game on the bench, which doesn&apos;t count.
+        </li>
       </ul>
     </section>
   );
 }
 
-type SideProps = {
-  team: Team;
-  data: TeamLineup;
-  day: number;
-  isToday: boolean;
-  statKey: string;
-  side: "left" | "right";
-};
+type SideProps = { team: Team; data: TeamLineup; day: number; isToday: boolean; side: "left" | "right" };
 
-function DaySide({ team, data, day, isToday, statKey, side }: SideProps) {
+function DaySide({ team, data, day, isToday, side }: SideProps) {
   const d = data.days[day];
   // In that day's slot order; a stable sort keeps the API's order (priority) within a slot.
   const playing = data.players
@@ -117,13 +97,13 @@ function DaySide({ team, data, day, isToday, statKey, side }: SideProps) {
     .sort((a, b) => slotRank(a.cells[day].slot) - slotRank(b.cells[day].slot));
   const idle = data.players.filter((p) => p.cells[day]?.slot && !p.cells[day].opponent && p.cells[day].slot !== "IR");
   // Today is settled once nothing counted is left to project, e.g. every game is final.
-  const settled = (PARTS[statKey] ?? [statKey]).every((k) => Math.abs(d.projected[k] - d.actual[k]) < 1e-9);
+  const settled = Math.abs(d.projected_value - d.actual_value) < 1e-9;
   const total =
     d.played || (isToday && settled)
-      ? `Final ${totalValue(d.actual, statKey, true)}`
+      ? `Final ${val(d.actual_value)}`
       : isToday
-        ? `Live ${totalValue(d.actual, statKey, true)} · proj final ${totalValue(d.projected, statKey, false)}`
-        : `Proj ${totalValue(d.projected, statKey, false)}`;
+        ? `Live ${val(d.actual_value)} · proj final ${val(d.projected_value)}`
+        : `Proj ${val(d.projected_value)}`;
   return (
     <div className={`day-side ${side}`}>
       <div className="day-side-head">
@@ -135,8 +115,15 @@ function DaySide({ team, data, day, isToday, statKey, side }: SideProps) {
       ) : (
         <table className="day-table">
           <tbody>
-            {playing.map(({ player, cells }) => (
-              <DayRow key={player.player_id} player={player} cell={cells[day]} statKey={statKey} side={side} />
+            {playing.map(({ player, cells, usual }) => (
+              <DayRow
+                key={player.player_id}
+                player={player}
+                cell={cells[day]}
+                usual={usual}
+                scale={data.value_scale}
+                side={side}
+              />
             ))}
           </tbody>
         </table>
@@ -144,7 +131,7 @@ function DaySide({ team, data, day, isToday, statKey, side }: SideProps) {
       <div className="day-total">
         <strong>{total}</strong>
         <span className="sub">
-          {num(d.starts, d.played)} starts
+          {d.played ? Math.round(d.starts) : d.starts.toFixed(1)} starts
           {!!d.missed_starts && (
             <span
               className="chip"
@@ -162,11 +149,19 @@ function DaySide({ team, data, day, isToday, statKey, side }: SideProps) {
   );
 }
 
-type RowProps = { player: Player; cell: LineupCell; statKey: string; side: "left" | "right" };
+type RowProps = {
+  player: Player;
+  cell: LineupCell;
+  usual: number | null;
+  scale: Scale;
+  side: "left" | "right";
+};
 
-function DayRow({ player, cell, statKey, side }: RowProps) {
+function DayRow({ player, cell, usual, scale, side }: RowProps) {
   const kind = !cell.counts ? "bench" : cell.actual ? "played" : "projected";
   const live = cell.game?.state === "live";
+  const value = cell.value ?? 0;
+  const shade = cell.counts && scale.sd > 0 ? zClass((value - scale.mean) / scale.sd) : "";
   const cells = [
     <td key="slot" className="slot">
       {cell.slot}
@@ -178,14 +173,49 @@ function DayRow({ player, cell, statKey, side }: RowProps) {
         vs {cell.opponent}
         <GameStatus cell={cell} />
       </div>
+      {cell.actual && <div className="meta">{boxLine(cell.stats)}</div>}
+      {cell.actual && cell.value_by_cat && <Drivers byCat={cell.value_by_cat} />}
     </td>,
-    <td key="value" className={`num value ${kind}`}>
-      <span className="v">{lineValue(cell.stats, statKey, cell.actual)}</span>
-      {live && <div className="meta">proj {lineValue(cell.projected, statKey, false)}</div>}
+    <td key="value" className={`num value zcell ${kind} ${shade}`}>
+      <span className="v">{val(value)}</span>
+      {live && cell.projected_value !== null && <div className="meta">proj {val(cell.projected_value)}</div>}
       {!cell.actual && <div className="meta">proj</div>}
+      {usual !== null && <div className="meta">usual {val(usual)}</div>}
     </td>,
   ];
   return <tr>{side === "left" ? cells : cells.reverse()}</tr>;
+}
+
+// The box score in brief: points, rebounds and assists, the rarer counting stats when there
+// are at least two, and shooting.
+function boxLine(s: Stats): string {
+  const parts = [`${s.PTS} pts`, `${s.REB} reb`, `${s.AST} ast`];
+  for (const [key, label] of [
+    ["STL", "stl"],
+    ["BLK", "blk"],
+    ["3PM", "3pm"],
+  ]) {
+    if (s[key] >= 2) parts.push(`${s[key]} ${label}`);
+  }
+  parts.push(`${s.FGM}/${s.FGA} fg`);
+  return parts.join(" · ");
+}
+
+// The two categories that moved the game's value most.
+function Drivers({ byCat }: { byCat: Record<string, number> }) {
+  const top = Object.keys(byCat)
+    .sort((a, b) => Math.abs(byCat[b]) - Math.abs(byCat[a]))
+    .slice(0, 2);
+  return (
+    <div className="effects drivers">
+      {top.map((k) => (
+        <span key={k} className="chip">
+          <span className="dot" style={{ background: byCat[k] >= 0 ? "var(--win)" : "var(--loss)" }} />
+          {k} {val(byCat[k])}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 function GameStatus({ cell }: { cell: LineupCell }) {
