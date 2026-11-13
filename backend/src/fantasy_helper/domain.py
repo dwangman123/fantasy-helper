@@ -134,6 +134,18 @@ class Move:
 
 
 @dataclass
+class Injury:
+    """An injured player's expected return, from ESPN's public NBA injury feed (the fantasy API
+    gives only a status). The date is ESPN's estimate and tends to be the early end of the
+    reported range."""
+
+    player_id: int
+    return_date: date | None
+    out_for_season: bool
+    note: str  # e.g. "Knee surgery"
+
+
+@dataclass
 class OpponentStats:
     """What opponents average against one NBA team: its per-game stats allowed."""
 
@@ -166,4 +178,5 @@ class LeagueSnapshot:
     live_stats: list[PlayerGameStat] = field(default_factory=list)  # rostered players' lines today so far
     live_games: list[LiveGame] = field(default_factory=list)  # today's NBA games
     moves: list[Move] = field(default_factory=list)  # adds and drops on the days fetched this run
+    injuries: list[Injury] = field(default_factory=list)  # empty if that fetch failed
     warnings: list[str] = field(default_factory=list)  # non-fatal fetch problems

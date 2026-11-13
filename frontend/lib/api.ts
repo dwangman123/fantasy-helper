@@ -92,6 +92,9 @@ export type Player = {
   pro_team: string;
   position: string;
   injury_status: string | null;
+  return_date: string | null; // ESPN's expected return (YYYY-MM-DD), an estimate
+  out_for_season: boolean;
+  injury_note: string | null; // e.g. "Knee surgery"
   z: Record<string, number>;
   value: number; // G-score: z weighted by how much each category bounces week to week
 };

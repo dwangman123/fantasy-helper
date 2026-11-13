@@ -168,7 +168,7 @@ function DayRow({ player, cell, usual, scale, side }: RowProps) {
     </td>,
     <td key="player">
       <span className="player-name">{player.name}</span>
-      <InjuryBadge status={player.injury_status} />
+      <InjuryBadge player={player} />
       <div className="player-meta">
         vs {cell.opponent}
         <GameStatus cell={cell} />

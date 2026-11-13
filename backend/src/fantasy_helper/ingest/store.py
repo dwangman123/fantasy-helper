@@ -148,6 +148,21 @@ def store_snapshot(session: Session, snap: LeagueSnapshot) -> dict[str, int]:
             )
             for o in snap.opponent_stats
         )
+    # Same for return dates: a failed fetch keeps the last good set rather than marking everyone healthy.
+    if snap.injuries:
+        session.execute(delete(m.PlayerInjury).where(m.PlayerInjury.season == season))
+        # Dedupe by player: a player traded mid-injury could be listed under two teams.
+        latest = {i.player_id: i for i in snap.injuries}
+        session.add_all(
+            m.PlayerInjury(
+                season=season,
+                player_id=i.player_id,
+                return_date=i.return_date,
+                out_for_season=i.out_for_season,
+                note=i.note[:100],
+            )
+            for i in latest.values()
+        )
     # Game logs are history: upserted (stat corrections overwrite), never deleted.
     for g in snap.game_stats:
         session.merge(
@@ -186,6 +201,7 @@ def store_snapshot(session: Session, snap: LeagueSnapshot) -> dict[str, int]:
         "matchups": len(snap.matchups),
         "game_stats": len(snap.game_stats),
         "opponent_stats": len(snap.opponent_stats),
+        "injuries": len(snap.injuries),
         "live_stats": len(snap.live_stats),
         "live_games": len(snap.live_games),
         "moves": len(snap.moves),

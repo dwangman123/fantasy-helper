@@ -2,10 +2,11 @@
 for deals that help both.
 
 Measure. Hold's (`waivers.py`), for each side: the change in expected categories
-won per week against a league-average team over the remaining weeks, everyone
-healthy, with each week's expected totals from the daily lineup cap over the NBA
-schedule. Also the change in P(win the week), from the per-category odds with the
-categories treated as independent (`week_odds`). The league average is
+won per week against a league-average team over the remaining weeks, with each
+week's expected totals from the daily lineup cap over the NBA schedule (an injured
+player has no games before his expected return, so the bench covers them). Also the
+change in P(win the week), from the per-category odds with the categories treated as
+independent (`week_odds`). The league average is
 recomputed with both rosters after the deal.
 
 Rosters stay legal. A side pushed over the roster limit drops its lowest-priority
@@ -35,7 +36,14 @@ from itertools import combinations
 import numpy as np
 
 from fantasy_helper.analytics.matchup import SimPlayer
-from fantasy_helper.analytics.waivers import cat_slopes, day_totals, weekly_cat_p_win, weekly_stats, weekly_totals
+from fantasy_helper.analytics.waivers import (
+    cat_slopes,
+    day_totals,
+    recount_from,
+    weekly_cat_p_win,
+    weekly_stats,
+    weekly_totals,
+)
 from fantasy_helper.analytics.zscores import pct
 from fantasy_helper.categories import Category
 from fantasy_helper.domain import STAT_KEYS
@@ -131,6 +139,8 @@ def _new_weekly(s: Season, team_id: int, out_ids: set[int], incoming: list[SimPl
     roster = [p for p in s.rosters[team_id] if p.player_id not in out_ids] + incoming
     changed = {d for p in [*leaving, *incoming] for d in p.games}
     base = s.day_totals[team_id]
+    if (first := recount_from(roster)) is not None:
+        changed |= {d for d in base if d >= first}
     return weekly_totals(
         {d: day_totals(roster, d, s.slot_counts) if d in changed else t for d, t in base.items()}, s.weeks
     )
@@ -142,8 +152,9 @@ def _cats_per_week(s: Season, weekly: np.ndarray, average: np.ndarray) -> float:
 
 def roster_moves(s: Season, team_id: int, receives: int, sends: set[int]) -> tuple[list[SimPlayer], list[SimPlayer]]:
     """Who a side drops to stay within the roster limit after getting `receives` players
-    for `sends`, and which free agents fill the spots the deal opens."""
-    kept = [p for p in s.rosters[team_id] if p.player_id not in sends]
+    for `sends`, and which free agents fill the spots the deal opens. A player in the IR slot
+    holds no spot now and can't be dropped; when he's back, `waivers.on_roster` makes room."""
+    kept = [p for p in s.rosters[team_id] if p.player_id not in sends and p.ir_back is None]
     over = len(kept) + receives - s.roster_spots
     drops = sorted(kept, key=lambda p: p.priority)[: max(over, 0)]
     opened = min(len(sends) - receives, s.roster_spots - len(kept) - receives)

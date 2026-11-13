@@ -5,7 +5,7 @@ Strength is the expected share of weekly matchups a team would win if it played 
 nine other teams every remaining week: each pair's per-category P(win) from the
 same normal approximation as Hold (`waivers.weekly_cat_p_win`), turned into
 P(win the week) by `trades.week_odds`. A tie counts half. Rosters are as they are
-now, everyone healthy.
+now, with injured players counted from their expected return (`LeagueContext.return_period`).
 
 The all-play record so far compares each completed week's category totals with
 every other team's that week, so it shows how a team's results hold up against

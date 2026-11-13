@@ -239,7 +239,7 @@ function Players({ players }: { players: Player[] }) {
       {players.map((p) => (
         <div key={p.player_id}>
           <span className="player-name">{p.name}</span>
-          <InjuryBadge status={p.injury_status} />
+          <InjuryBadge player={p} />
           <span className="player-meta" title="G-score value">
             {" "}
             {p.pro_team} · value {p.value.toFixed(1)}
@@ -364,7 +364,7 @@ function RosterPicker({ title, players, selected, onToggle }: PickerProps) {
                   </td>
                   <td>
                     <span className="player-name">{p.player.name}</span>
-                    <InjuryBadge status={p.player.injury_status} />
+                    <InjuryBadge player={p.player} />
                     <div className="player-meta">
                       {p.player.pro_team} · {p.player.position}
                     </div>

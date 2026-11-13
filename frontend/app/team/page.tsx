@@ -188,7 +188,7 @@ function RosterTable({ players, profile, categories }: RosterProps) {
               <td className="sub">{p.slot}</td>
               <td>
                 <span className="player-name">{p.player.name}</span>
-                <InjuryBadge status={p.player.injury_status} />
+                <InjuryBadge player={p.player} />
                 <div className="player-meta">
                   {p.player.pro_team} · {p.player.position}
                   {acquired(p)}

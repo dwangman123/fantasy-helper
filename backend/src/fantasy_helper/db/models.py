@@ -6,7 +6,7 @@ each ingest; `players` is keyed by ESPN player id across seasons.
 
 from datetime import date, datetime
 
-from sqlalchemy import JSON, Date, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -219,6 +219,20 @@ class OpponentStat(Base):
     fga: Mapped[float] = mapped_column(Float)
     ftm: Mapped[float] = mapped_column(Float)
     fta: Mapped[float] = mapped_column(Float)
+
+
+class PlayerInjury(Base):
+    """ESPN's expected return for every listed NBA injury. Replaced on ingests where the
+    fetch succeeds. Keyed by ESPN player id, like `players`, but not every injured player is
+    in the stored pool, so there is no foreign key."""
+
+    __tablename__ = "player_injuries"
+
+    season: Mapped[int] = mapped_column(Integer, primary_key=True)
+    player_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    return_date: Mapped[date | None] = mapped_column(Date)
+    out_for_season: Mapped[bool] = mapped_column(Boolean)
+    note: Mapped[str] = mapped_column(String(100))
 
 
 class ProGame(Base):

@@ -349,13 +349,16 @@ def _player(ctx: LeagueContext, pid: int | None, players: dict[int, Player] | No
     """`players` overrides ctx.players, e.g. for someone dropped earlier in the week."""
     if pid is None:
         return None
-    p, z = (players or ctx.players)[pid], ctx.z.get(pid)
+    p, z, injury = (players or ctx.players)[pid], ctx.z.get(pid), ctx.injury(pid)
     return s.PlayerOut(
         player_id=pid,
         name=p.name,
         pro_team=p.pro_team,
         position=p.position,
         injury_status=p.injury_status,
+        return_date=injury.return_date if injury else None,
+        out_for_season=injury.out_for_season if injury else False,
+        injury_note=(injury.note or None) if injury else None,
         z=z.by_cat if z else {},
         value=z.value if z else 0.0,
     )
@@ -666,7 +669,8 @@ def power(c: CtxDep):
         notes=[
             f"Strength is the expected share of weekly matchups a team would win playing every other team in each of "
             f"weeks {later[0].matchup_period}-{later[-1].matchup_period} (playoffs included), with rosters as they "
-            "are now and everyone healthy; a tied week counts half.",
+            "are now and injured players back from ESPN's expected return date (one in the IR slot then takes the "
+            "place of his team's lowest-value player); a tied week counts half.",
             "Strength counts each team's NBA schedule and the daily lineup cap, so it can disagree with the per-game "
             "heatmap. Winning a week treats the nine categories as independent.",
             f"Projected record is the record so far plus each team's expected results in the rest of the regular "
