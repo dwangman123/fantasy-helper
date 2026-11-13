@@ -13,7 +13,8 @@ a swing category counts, help in a locked or lost one barely does, and hurting a
 lost category costs nothing, so weekly punts fall out without being coded.
 
 Hold (rest of season). Change in expected categories won per week against a
-league-average opponent over the remaining weeks, everyone assumed healthy. A
+league-average opponent over the remaining weeks. Nobody misses a game at random, but
+an injured player has no games before his expected return (the caller removes them). A
 week's expected totals come from the daily lineup cap over the NBA schedule, and
 P(win) per category is a normal approximation: variance phi * mean for counting
 stats, p(1 - p) / attempts for percentages.
@@ -111,9 +112,13 @@ def _started_stats(add: SimPlayer, mine: list[SimPlayer], slot_counts: dict[str,
     """Expected stats from the games he'd start, assuming everyone else who can play does."""
     total = np.zeros(len(STAT_KEYS))
     for day, factors in add.games.items():
-        playing = sorted([p for p in mine if day in p.games and p.p_play > 0] + [add], key=lambda p: -p.priority)
+        if add.p_play_on(day) <= 0:
+            continue
+        playing = sorted(
+            [p for p in mine if day in p.games and p.p_play_on(day) > 0] + [add], key=lambda p: -p.priority
+        )
         if add.player_id in assign_starters([(p.player_id, p.eligible_slots) for p in playing], slot_counts):
-            total += [add.p_play * add.per_game[k] * factors.get(k, 1.0) for k in STAT_KEYS]
+            total += [add.p_play_on(day) * add.per_game[k] * factors.get(k, 1.0) for k in STAT_KEYS]
     return total
 
 
@@ -141,7 +146,7 @@ def screen_stream(
     `adds` hold only the games they can play; `slopes` come from `draw_slopes`."""
     scored = []
     for add in adds:
-        stats = _started_stats(add, mine, slot_counts) if add.p_play > 0 else np.zeros(len(STAT_KEYS))
+        stats = _started_stats(add, mine, slot_counts)
         if stats.any():
             scored.append((float(stats @ slopes), add))
     scored.sort(key=lambda s: s[0], reverse=True)
@@ -236,9 +241,26 @@ class HoldRanking:
     screened: int
 
 
+def on_roster(players: list[SimPlayer], day: int, slot_counts: dict[str, int]) -> list[SimPlayer]:
+    """Who holds a roster spot on `day`. A player in the IR slot (`ir_back`) takes one once he's
+    back; if that puts the team over its roster spots, it drops its lowest-priority players."""
+    if all(p.ir_back is None for p in players):
+        return players
+    back = [p for p in players if p.ir_back is not None and p.ir_back <= day]
+    kept = [p for p in players if p.ir_back is None] + back
+    over = min(len(kept) - sum(n for slot, n in slot_counts.items() if slot != "IR"), len(back))
+    return sorted(kept, key=lambda p: -p.priority)[: len(kept) - over] if over > 0 else kept
+
+
+def recount_from(players: list[SimPlayer]) -> int | None:
+    """The first day a roster change can move a roster spot: once a player in the IR slot is
+    back, adding or removing anyone can change who his team drops for him."""
+    return min((p.ir_back for p in players if p.ir_back is not None), default=None)
+
+
 def day_totals(players: list[SimPlayer], day: int, slot_counts: dict[str, int]) -> np.ndarray:
-    """Expected stats from the players who'd start that day (everyone healthy)."""
-    playing = sorted((p for p in players if day in p.games), key=lambda p: -p.priority)
+    """Expected stats from the players who'd start that day (everyone with a game plays)."""
+    playing = sorted((p for p in on_roster(players, day, slot_counts) if day in p.games), key=lambda p: -p.priority)
     total = np.zeros(len(STAT_KEYS))
     if not playing:
         return total
@@ -351,6 +373,8 @@ def rank_hold(
         for drop_id in drop_ids:
             roster = [p for p in mine if p.player_id != drop_id] + [add]
             changed = set(add.games) | (set(by_id[drop_id].games) if drop_id is not None else set())
+            if (first := recount_from(roster)) is not None:
+                changed |= {d for d in days if d >= first}
             totals = {d: day_totals(roster, d, slot_counts) if d in changed else base_days[d] for d in days}
             p = weekly_cat_p_win(weekly_totals(totals, weeks), average, categories, dispersion)
             options.append(

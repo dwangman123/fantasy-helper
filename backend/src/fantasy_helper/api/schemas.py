@@ -137,6 +137,10 @@ class PlayerOut(BaseModel):
     pro_team: str
     position: str
     injury_status: str | None
+    # ESPN's expected return for an injured player (an estimate); None if healthy or not listed.
+    return_date: date | None = None
+    out_for_season: bool = False
+    injury_note: str | None = None  # e.g. "Knee surgery"
     z: dict[str, float]  # blended per-category z-scores
     value: float  # G-score: z weighted by how much each category bounces week to week
 

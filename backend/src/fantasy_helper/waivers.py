@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from fantasy_helper.analytics.waivers import HoldRanking, StreamRanking, rank_hold, rank_stream
 from fantasy_helper.config import get_settings
-from fantasy_helper.context import LeagueContext, load_context
+from fantasy_helper.context import LeagueContext, injury_assumption, load_context
 from fantasy_helper.db import queries as q
 from fantasy_helper.db.session import get_sessionmaker
 from fantasy_helper.domain import Matchup
@@ -102,11 +102,11 @@ def waiver_report(
     hold_days = [d for w in later for d in w.scoring_periods]
     hold = rank_hold(
         ctx.categories,
-        ctx.team_sim_players(team_id, hold_days, healthy=True),
-        [ctx.team_sim_players(t, hold_days, healthy=True) for t in sorted({r.team_id for r in ctx.rosters})],
+        ctx.team_sim_players(team_id, hold_days, rest_of_season=True),
+        [ctx.team_sim_players(t, hold_days, rest_of_season=True) for t in sorted({r.team_id for r in ctx.rosters})],
         [list(w.scoring_periods) for w in later],
         ctx.slot_counts,
-        [ctx.sim_player(pid, hold_days, healthy=True) for pid in fa_ids],
+        [ctx.sim_player(pid, hold_days, rest_of_season=True) for pid in fa_ids],
         drops,
         limit=max_adds,
         dispersion=ctx.dispersion,
@@ -127,7 +127,7 @@ def waiver_report(
         hold=hold,
         hold_periods=[w.matchup_period for w in later],
         games_this_week={pid: len(ctx.sim_player(pid, playable).games) for pid in fa_ids},
-        hold_games={pid: len(ctx.sim_player(pid, hold_days).games) for pid in fa_ids},
+        hold_games={pid: len(ctx.sim_player(pid, hold_days, rest_of_season=True).games) for pid in fa_ids},
         n_sims=n_sims,
         assumptions=_assumptions(ctx, first_day, same_day),
     )
@@ -147,7 +147,8 @@ def _assumptions(ctx: LeagueContext, first_day: int, same_day: bool) -> list[str
         "Each line is one add/drop, not a chain of moves through the week.",
         "The league's add limit isn't checked yet (its setting is unclear), so make sure you have an add left.",
         "The free-agent pool may include players still on waivers, who can't be added until they clear.",
-        "Hold compares against a league-average team over the remaining weeks, with everyone healthy.",
+        "Hold compares against a league-average team over the remaining weeks.",
+        injury_assumption(ctx),
     ]
 
 

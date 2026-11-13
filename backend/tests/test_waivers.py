@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import numpy as np
 import pytest
 from sqlalchemy.orm import Session
@@ -5,11 +7,14 @@ from sqlalchemy.orm import Session
 from fantasy_helper.analytics.matchup import SimPlayer
 from fantasy_helper.analytics.waivers import (
     category_board,
+    day_totals,
+    on_roster,
     rank_hold,
     rank_stream,
     screen_stream,
     side_view,
     weekly_cat_p_win,
+    weekly_totals,
 )
 from fantasy_helper.categories import KNOWN_CATEGORIES
 from fantasy_helper.context import load_context
@@ -105,6 +110,42 @@ def test_hold_values_games_and_picks_the_weakest_drop():
     assert (every.add_id, every.drop_id, half.add_id) == (20, 4, 21)
     # Half the games of my weakest player is a step down, despite the better per-game line.
     assert every.d_cats_per_week > 0 > half.d_cats_per_week
+
+
+THREE_SPOTS = {"UT": 3, "IR": 1}
+
+
+def test_a_player_back_from_ir_takes_the_spot_of_the_lowest_priority_player():
+    a, b, c = (player(i, days=[1, 2, 3, 4], priority=3 - i, PTS=10) for i in range(3))
+    ir = replace(player(9, days=[3, 4], priority=2.5, PTS=20), ir_back=3)
+    ids = lambda players, day: {p.player_id for p in on_roster(players, day, THREE_SPOTS)}  # noqa: E731
+    assert ids([a, b, c, ir], 2) == {0, 1, 2}
+    assert ids([a, b, c, ir], 3) == {0, 1, 9}
+    assert ids([a, b, ir], 3) == {0, 1, 9}  # an open spot: nobody goes
+    assert ids([a, b, c, replace(ir, priority=-1)], 3) == {0, 1, 2}  # he's the weakest, so he stays off
+    assert day_totals([a, b, c, ir], 2, THREE_SPOTS)[0] == 30 and day_totals([a, b, c, ir], 3, THREE_SPOTS)[0] == 40
+
+
+def test_hold_recounts_who_makes_room_for_a_player_back_from_ir():
+    """Dropping the player who'd make room for him sends the next weakest instead, on days
+    neither the pickup nor the drop plays."""
+    weeks, days = [[1, 2], [3, 4]], [1, 2, 3, 4]
+    a = player(0, days=days, priority=3, PTS=10)
+    b = player(1, days=[2, 4], priority=2, PTS=10)
+    c = player(2, days=[1, 3], priority=1, PTS=5)
+    ir = replace(player(9, days=[3, 4], priority=2.5, PTS=20), ir_back=3)
+    add = player(5, days=[1, 3], priority=4, PTS=12)
+    mine = [a, b, c, ir]
+    league = [mine, [player(10 + i, days=days, PTS=10) for i in range(3)]]
+    [option] = rank_hold([PTS], mine, league, weeks, THREE_SPOTS, [add], [2]).options
+
+    def cats(roster):
+        average = np.mean([weekly_totals({d: day_totals(t, d, THREE_SPOTS) for d in days}, weeks) for t in league], 0)
+        weekly = weekly_totals({d: day_totals(roster, d, THREE_SPOTS) for d in days}, weeks)
+        return sum(weekly_cat_p_win(weekly, average, [PTS], {}).values())
+
+    assert day_totals([a, b, add, ir], 4, THREE_SPOTS)[0] == 30  # b makes room on day 4
+    assert option.d_cats_per_week == pytest.approx(float((cats([a, b, add, ir]) - cats(mine)).mean()))
 
 
 def test_weekly_p_win_is_even_for_equal_teams_and_reverses_turnovers():

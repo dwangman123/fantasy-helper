@@ -3,8 +3,9 @@
 No network access here, so everything is unit-testable with fakes.
 """
 
+import re
 from collections import Counter
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from espn_api.basketball.constant import POSITION_MAP, PRO_TEAM_MAP, STATS_MAP
@@ -15,6 +16,7 @@ from fantasy_helper.domain import (
     STAT_KEYS,
     STAT_WINDOWS,
     DailySlot,
+    Injury,
     LiveGame,
     Matchup,
     Move,
@@ -380,4 +382,34 @@ def parse_opponent_stats(data: dict) -> list[OpponentStats]:
                 per_game={key: float(values[name]) for name, key in _OPPONENT_STAT_NAMES.items()},
             )
         )
+    return out
+
+
+_ATHLETE_ID = re.compile(r"/id/(\d+)")
+
+
+def parse_injuries(data: dict) -> list[Injury]:
+    """Every listed injury, from ESPN's public site API nba/injuries response. The athlete id
+    in the player page link is the fantasy player id. Fantasy status OFS is out for the season."""
+    out = []
+    for team in data.get("injuries", []):
+        for entry in team.get("injuries", []):
+            ids = (_ATHLETE_ID.search(link.get("href", "")) for link in entry.get("athlete", {}).get("links", []))
+            player_id = next((int(m.group(1)) for m in ids if m), None)
+            if player_id is None:
+                continue
+            details = entry.get("details") or {}
+            returns = details.get("returnDate")
+            detail = details.get("detail")
+            note = " ".join(
+                s for s in (details.get("type"), detail.lower() if detail and detail != "Not Specified" else None) if s
+            )
+            out.append(
+                Injury(
+                    player_id=player_id,
+                    return_date=date.fromisoformat(returns[:10]) if returns else None,
+                    out_for_season=(details.get("fantasyStatus") or {}).get("abbreviation") == "OFS",
+                    note=note,
+                )
+            )
     return out

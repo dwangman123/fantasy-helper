@@ -1,5 +1,5 @@
 """Network layer: pulls one consistent LeagueSnapshot from ESPN via espn_api,
-plus NBA opponent stats from ESPN's public site API."""
+plus NBA opponent stats, the scoreboard and injury return dates from ESPN's public site API."""
 
 import json
 import urllib.request
@@ -12,7 +12,7 @@ from espn_api.basketball import League
 from fantasy_helper.calendar import load_calendar
 from fantasy_helper.categories import categories_from_scoring_items
 from fantasy_helper.config import Settings
-from fantasy_helper.domain import DailySlot, LeagueSnapshot, LiveGame, Move, OpponentStats, PlayerGameStat
+from fantasy_helper.domain import DailySlot, Injury, LeagueSnapshot, LiveGame, Move, OpponentStats, PlayerGameStat
 from fantasy_helper.espn import parse
 
 
@@ -99,6 +99,10 @@ OPPONENT_STATS_URL = (
     "https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/statistics/byteam?category=opponent&limit=30"
 )
 SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates={day:%Y%m%d}"
+INJURIES_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries"
+# The league-wide list runs to about 100 in season; far fewer means a broken response, and storing
+# it would mark everyone healthy.
+MIN_INJURIES = 10
 
 
 def fetch_live_games(day: date) -> list[LiveGame]:
@@ -106,6 +110,16 @@ def fetch_live_games(day: date) -> list[LiveGame]:
     request = urllib.request.Request(SCOREBOARD_URL.format(day=day), headers={"User-Agent": "fantasy-helper"})
     with urllib.request.urlopen(request, timeout=30) as response:
         return parse.parse_live_games(json.load(response))
+
+
+def fetch_injuries() -> list[Injury]:
+    """Every NBA injury with ESPN's expected return date (the fantasy API has only a status)."""
+    request = urllib.request.Request(INJURIES_URL, headers={"User-Agent": "fantasy-helper"})
+    with urllib.request.urlopen(request, timeout=30) as response:
+        injuries = parse.parse_injuries(json.load(response))
+    if len(injuries) < MIN_INJURIES:
+        raise ValueError(f"Expected at least {MIN_INJURIES} NBA injuries, got {len(injuries)}")
+    return injuries
 
 
 def fetch_opponent_stats() -> list[OpponentStats]:
@@ -162,6 +176,11 @@ def fetch_snapshot(
     except Exception as exc:  # estimate from tip times rather than double-count or drop today's games
         live_games = parse.estimate_live_games(parse.tips(list(all_players.values()), today), datetime.now(UTC))
         warnings.append(f"NBA scoreboard unavailable, estimating today's games from tip times: {exc!r}")
+    try:
+        injuries = fetch_injuries()
+    except Exception as exc:  # optional input: rest-of-season views keep the last stored return dates
+        injuries = []
+        warnings.append(f"NBA injury report unavailable, keeping the last stored return dates: {exc!r}")
 
     owners = parse.owner_names(league.teams)
     return LeagueSnapshot(
@@ -191,5 +210,6 @@ def fetch_snapshot(
         live_stats=roster_days.live,
         live_games=live_games,
         moves=fetch_moves(league, move_days(today, last_move_day)),
+        injuries=injuries,
         warnings=warnings,
     )

@@ -102,7 +102,7 @@ def team_week(
         p = players.get(pid)
         if p is None or day not in p.games:
             return _zeros()
-        return {k: p.per_game[k] * p.games[day].get(k, 1.0) * p.p_play for k in STAT_KEYS}
+        return {k: p.per_game[k] * p.games[day].get(k, 1.0) * p.p_play_on(day) for k in STAT_KEYS}
 
     rows = []
     for pid in ids:
@@ -126,7 +126,7 @@ def team_week(
                 opponent = opponents.get(pid, {}).get(day) if slot is not None else None
                 game = games_today.get(pid) if day == today and opponent is not None else None
                 rest = projection(pid, day) if opponent is not None else _zeros()
-                p_play = players[pid].p_play if pid in players else 0.0
+                p_play = players[pid].p_play_on(day) if pid in players else 0.0
                 if game is not None and game.state != "pre":
                     # Tipped: his line so far, plus the rest of the game (gone once it's final).
                     so_far = dict(live[pid].stats) if pid in live else _zeros()
@@ -175,7 +175,7 @@ def team_week(
             if row.cells[i].opponent is not None
             and row.cells[i].slot not in (None, "IR")
             and (p := players.get(row.player_id)) is not None
-            and p.p_play > 0
+            and p.p_play_on(day) > 0
         ]
         set_starters = [row.player_id for row in rows if row.player_id in able and row.cells[i].counts]
         best = assign_starters([(pid, players[pid].eligible_slots) for pid in able], slot_counts)

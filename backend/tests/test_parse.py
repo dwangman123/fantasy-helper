@@ -232,3 +232,42 @@ def test_moves_are_executed_adds_and_drops_with_names():
 def test_acquisition_dates_come_from_roster_entries():
     teams = [{"id": 4, "roster": {"entries": [{"playerId": 7, "acquisitionDate": 1792540741520}, {"playerId": 8}]}}]
     assert parse.parse_acquired_at(teams) == {7: datetime.fromtimestamp(1792540741.52, UTC)}
+
+
+def _injury(href, **details):
+    return {"athlete": {"links": [{"href": href}]}, "details": details}
+
+
+def test_injuries_read_the_player_id_return_date_and_season_flag():
+    data = {
+        "injuries": [
+            {
+                "injuries": [
+                    _injury(
+                        "https://www.espn.com/nba/player/_/id/3975/stephen-curry",
+                        type="Abdomen",
+                        returnDate="2026-12-12",
+                        fantasyStatus={"abbreviation": "OUT"},
+                    ),
+                    _injury(
+                        "https://www.espn.com/nba/player/_/id/4433255/x",
+                        type="Knee",
+                        detail="Surgery",
+                        returnDate="2027-07-01",
+                        fantasyStatus={"abbreviation": "OFS"},
+                    ),
+                    _injury("https://www.espn.com/nba/player/_/id/77/y", type="Hamstring", detail="Not Specified"),
+                    _injury("https://www.espn.com/nba/team/_/name/gs"),  # no player id: skipped
+                ]
+            }
+        ]
+    }
+    curry, season, undated = parse.parse_injuries(data)
+    assert (curry.player_id, curry.return_date, curry.out_for_season, curry.note) == (
+        3975,
+        date(2026, 12, 12),
+        False,
+        "Abdomen",
+    )
+    assert (season.player_id, season.out_for_season, season.note) == (4433255, True, "Knee surgery")
+    assert (undated.player_id, undated.return_date, undated.note) == (77, None, "Hamstring")

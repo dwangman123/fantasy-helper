@@ -15,7 +15,7 @@ from fantasy_helper.analytics.trades import (
 )
 from fantasy_helper.categories import KNOWN_CATEGORIES
 from fantasy_helper.context import load_context
-from fantasy_helper.domain import STAT_KEYS
+from fantasy_helper.domain import STAT_KEYS, Injury
 from fantasy_helper.trades import season_outlook, trade_ideas, trade_report
 from tests.league_fixture import MY_TEAM, SEASON, SLOTS, stored_league
 
@@ -101,7 +101,9 @@ def stored():
 def test_outlook_covers_the_weeks_after_this_one(stored):
     ctx, outlook = stored
     assert outlook.weeks[0][0] == ctx.calendar.week(ctx.matchup_period + 1).first_scoring_period
-    assert len(outlook.rosters) == 10 and all(len(r) == 13 for r in outlook.rosters.values())
+    assert len(outlook.rosters) == 10 and all(sum(p.ir_back is None for p in r) == 13 for r in outlook.rosters.values())
+    # Each team's IR player has no return date in the fixture, so he's back after this week.
+    assert all([p.ir_back for p in r if p.ir_back] == [outlook.weeks[0][0]] for r in outlook.rosters.values())
     assert all(fills for fills in outlook.fills.values())
 
 
@@ -110,22 +112,38 @@ def test_report_checks_the_deal_and_warns_about_injuries(stored):
     mine, theirs = (outlook.rosters[t][0].player_id for t in (MY_TEAM, 7))
     report = trade_report(ctx, outlook, MY_TEAM, 7, [mine], [theirs])
     assert report.result.me.team_id == MY_TEAM and report.warnings == [] and report.assumptions
+    assert report.result.me.drops == []  # the IR player holds no roster spot, so 1-for-1 needs no drop
+    ir = next(p.player_id for p in outlook.rosters[7] if p.ir_back is not None)
+    with pytest.raises(ValueError, match="outside the IR slot"):
+        trade_report(ctx, outlook, MY_TEAM, 7, [mine], [ir])
     with pytest.raises(ValueError, match="on its roster"):
         trade_report(ctx, outlook, MY_TEAM, 7, [theirs], [mine])
     with pytest.raises(ValueError, match="1 to 3"):
         trade_report(ctx, outlook, MY_TEAM, 7, [], [theirs])
     with pytest.raises(ValueError, match="two different teams"):
         trade_report(ctx, outlook, MY_TEAM, MY_TEAM, [mine], [mine])
-    hurt = replace(ctx, players=ctx.players | {theirs: replace(ctx.players[theirs], injury_status="OUT")})
-    [warning] = trade_report(hurt, outlook, MY_TEAM, 7, [mine], [theirs]).warnings
-    assert "is out" in warning
+    out = replace(ctx, players=ctx.players | {theirs: replace(ctx.players[theirs], injury_status="OUT")})
+    [warning] = trade_report(out, outlook, MY_TEAM, 7, [mine], [theirs]).warnings
+    assert "is out with no return date listed" in warning
+    back = ctx.calendar.week(ctx.matchup_period + 2).start
+    dated = replace(out, injuries={theirs: Injury(theirs, back, False, "Knee")})
+    [warning] = trade_report(dated, season_outlook(dated), MY_TEAM, 7, [mine], [theirs]).warnings
+    assert f"out until {back:%b} {back.day}" in warning
+    gone = replace(out, injuries={theirs: Injury(theirs, None, True, "Knee")})
+    [warning] = trade_report(gone, season_outlook(gone), MY_TEAM, 7, [mine], [theirs]).warnings
+    assert "out for the season" in warning
 
 
-def test_ideas_leave_out_injured_players(stored):
+def test_ideas_leave_out_players_whose_value_cant_be_told(stored):
     ctx, outlook = stored
-    out = outlook.rosters[3][0].player_id
-    hurt = replace(ctx, players=ctx.players | {out: replace(ctx.players[out], injury_status="OUT")})
-    ideas = trade_ideas(hurt, outlook, MY_TEAM, per_shape=3)
+    pid = outlook.rosters[3][0].player_id
+    out = replace(ctx, players=ctx.players | {pid: replace(ctx.players[pid], injury_status="OUT")})
+    ideas = trade_ideas(out, outlook, MY_TEAM, per_shape=3)
     assert ideas.search.evaluated <= 9 * 3 * 3 and ideas.assumptions
-    assert all(out not in d.me.receives for d in ideas.search.deals)
+    assert all(pid not in d.me.receives for d in ideas.search.deals)
     assert all(MY_TEAM == d.me.team_id != d.partner.team_id for d in ideas.search.deals)
+    # Out for the season: still left out. Back in two weeks: dealt for the games he has left.
+    gone = replace(out, injuries={pid: Injury(pid, None, True, "Knee")})
+    assert trade_ideas(gone, season_outlook(gone), MY_TEAM, per_shape=3).search.candidates == ideas.search.candidates
+    back = replace(out, injuries={pid: Injury(pid, ctx.calendar.week(ctx.matchup_period + 2).start, False, "Knee")})
+    assert trade_ideas(back, season_outlook(back), MY_TEAM, per_shape=3).search.candidates > ideas.search.candidates

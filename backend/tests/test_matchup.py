@@ -54,6 +54,13 @@ def test_out_players_add_nothing_and_day_to_day_about_half():
     assert pred.expected_games["away"] == pytest.approx(0.5, abs=0.03)
 
 
+def test_an_injured_player_sits_until_his_return():
+    back = player(1, days=(1, 2, 3, 4), p_play=1.0)
+    back.out_before = 3
+    pred = simulate_matchup([PTS], {"home": {}, "away": {}}, {"home": [back], "away": []}, [1, 2, 3, 4], SLOTS, 500)
+    assert pred.expected_games["home"] == 2
+
+
 def test_fixed_seed_is_reproducible():
     args = (CATS, {"home": {}, "away": {}}, {"home": [player(1)], "away": [player(2)]}, [1, 2, 3], SLOTS, 500)
     assert simulate_matchup(*args, seed=7) == simulate_matchup(*args, seed=7)

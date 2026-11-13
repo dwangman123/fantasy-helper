@@ -2,7 +2,8 @@
 days left in the week.
 
 Each draw walks the remaining days. A player with a game that day plays with
-probability `p_play`, and the league's starting slots then decide who starts
+probability `p_play` (none before `out_before`, an injured player's expected return),
+and the league's starting slots then decide who starts
 (`lineup.assign_starters`, highest priority first), since benched games don't
 count. A started game adds the player's per-game rate times an optional per-stat
 factor for that game (e.g. an opponent adjustment). Games that have tipped are
@@ -56,6 +57,14 @@ class SimPlayer:
     # Day -> the slot he's locked into because his game has tipped. A locked starter keeps
     # his slot (even once his game is over and gone from `games`); a locked bench player adds nothing.
     locked: dict[int, str] = field(default_factory=dict)
+    # Rest-of-season views only: a player in the IR slot takes a roster spot from this day on
+    # (see `waivers.on_roster`); None for everyone else.
+    ir_back: int | None = None
+    # This week: an injured player can't play before this day (his expected return); None if no limit.
+    out_before: int | None = None
+
+    def p_play_on(self, day: int) -> float:
+        return 0.0 if self.out_before is not None and day < self.out_before else self.p_play
 
 
 @dataclass
@@ -85,11 +94,12 @@ def _uniforms(seed: int, n: int, *key: int) -> np.ndarray:
 
 
 def _available(p: SimPlayer, day: int, n_sims: int, seed: int, side: int) -> np.ndarray:
-    if p.p_play >= 1.0:
+    p_play = p.p_play_on(day)
+    if p_play >= 1.0:
         return np.ones(n_sims, dtype=bool)
-    if p.p_play <= 0.0:
+    if p_play <= 0.0:
         return np.zeros(n_sims, dtype=bool)
-    return _uniforms(seed, n_sims, _AVAILABILITY, side, p.player_id, day) < p.p_play
+    return _uniforms(seed, n_sims, _AVAILABILITY, side, p.player_id, day) < p_play
 
 
 def _remaining_means(

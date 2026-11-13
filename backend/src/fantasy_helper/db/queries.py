@@ -9,6 +9,7 @@ from fantasy_helper.categories import KNOWN_CATEGORIES, Category
 from fantasy_helper.db import models as m
 from fantasy_helper.domain import (
     DailySlot,
+    Injury,
     LiveGame,
     Matchup,
     Move,
@@ -111,6 +112,11 @@ def load_opponent_stats(session: Session, season: int) -> list[OpponentStats]:
         OpponentStats(r.pro_team, r.gp, {key: getattr(r, col) for col, key in _STAT_KEYS_BY_COLUMN.items()})
         for r in rows
     ]
+
+
+def load_injuries(session: Session, season: int) -> dict[int, Injury]:
+    rows = session.scalars(select(m.PlayerInjury).where(m.PlayerInjury.season == season))
+    return {r.player_id: Injury(r.player_id, r.return_date, r.out_for_season, r.note) for r in rows}
 
 
 def load_game_stat_days(session: Session, season: int) -> set[int]:
