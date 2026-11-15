@@ -445,6 +445,12 @@ tr.selected td {
   text-decoration: line-through;
 }
 
+/* Ruled out that day: an ✕ in place of the score. */
+.day-table td.out .v {
+  color: var(--critical);
+  font-weight: 600;
+}
+
 .day-table .live {
   color: var(--ink);
   font-weight: 600;
