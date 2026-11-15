@@ -7,7 +7,9 @@ at his per-game rate times that game's opponent factor and his chance of playing
 a game on the bench is projected too but counts for nothing. Today is live: once a
 game tips, a cell shows the player's line so far, and its projected final adds his
 rate over the part of the game still to play (the SimPlayer's factors for today
-are already scaled down to that part). `missed_starts` is how many more games the
+are already scaled down to that part). A game on a day he's ruled out (no chance of
+playing: injured, suspended, or before his expected return) is flagged `out`: he
+won't play it, so it's worth nothing. `missed_starts` is how many more games the
 day's best lineup would start (`lineup.assign_starters` over the players able to
 play), i.e. games the set lineup leaves on the bench.
 
@@ -36,6 +38,7 @@ class DayCell:
     projected: dict[str, float]  # the game's projected final: equals `stats` except during a live game
     game: LiveGame | None = None  # today's game state; None on other days
     start: float = 0.0  # games this cell starts: 1 once played, else his chance of playing; 0 if it doesn't count
+    out: bool = False  # ruled out that day (no chance of playing), so the game is worth nothing; today on only
 
 
 @dataclass
@@ -135,6 +138,8 @@ def team_week(
                 else:
                     stats, projected, actual, start = rest, rest, False, p_play
                 counts = opponent is not None and _starts(slot)
+                # A player without a stat line isn't ruled out, just missing.
+                out = opponent is not None and pid in players and players[pid].p_play_on(day) <= 0
                 cell = DayCell(
                     day,
                     slot,
@@ -145,6 +150,7 @@ def team_week(
                     projected=projected,
                     game=game,
                     start=start if counts else 0.0,
+                    out=out,
                 )
             if cell.counts:
                 _add(totals, cell.projected)

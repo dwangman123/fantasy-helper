@@ -413,8 +413,9 @@ def lineup(c: CtxDep, team_id: int | None = None, period: int | None = None):
                 projected=week.day_projected[i],
                 starts=week.starts[i],
                 missed_starts=week.missed_starts[i],
-                actual_value=sum(c[i].value or 0.0 for _, c in rows if c[i].counts and c[i].actual),
-                projected_value=sum(c[i].projected_value or 0.0 for _, c in rows if c[i].counts),
+                # A ruled-out game is worth nothing, not an empty line's value.
+                actual_value=sum(c[i].value or 0.0 for _, c in rows if c[i].counts and c[i].actual and not c[i].out),
+                projected_value=sum(c[i].projected_value or 0.0 for _, c in rows if c[i].counts and not c[i].out),
             )
             for i, day in enumerate(days)
         ],
@@ -447,6 +448,7 @@ def _lineup_cell(ctx: LeagueContext, x: DayCell) -> s.LineupCell:
         value=sum(by_cat.values()) if by_cat is not None else None,
         projected_value=sum(ctx.game_value(x.projected).values()) if has_game else None,
         value_by_cat=by_cat,
+        out=x.out,
     )
 
 

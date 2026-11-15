@@ -80,7 +80,8 @@ export function DayLineup({ left, right, period }: Props) {
           {period === undefined
             ? " Bold: box score (today: the line so far). Regular: projected (per-game rate × opponent × chance of playing)."
             : " Box scores are the ones stored when each day was fetched, so ESPN's later stat corrections can leave one a stat off."}{" "}
-          <s>Struck through</s>: a game on the bench, which doesn&apos;t count.
+          <s>Struck through</s>: a game on the bench, which doesn&apos;t count. ✕: ruled out that day (injured or
+          suspended), so his game counts for nothing.
         </li>
       </ul>
     </section>
@@ -158,10 +159,10 @@ type RowProps = {
 };
 
 function DayRow({ player, cell, usual, scale, side }: RowProps) {
-  const kind = !cell.counts ? "bench" : cell.actual ? "played" : "projected";
+  const kind = cell.out ? "out" : !cell.counts ? "bench" : cell.actual ? "played" : "projected";
   const live = cell.game?.state === "live";
   const value = cell.value ?? 0;
-  const shade = cell.counts && scale.sd > 0 ? zClass((value - scale.mean) / scale.sd) : "";
+  const shade = kind !== "out" && cell.counts && scale.sd > 0 ? zClass((value - scale.mean) / scale.sd) : "";
   const cells = [
     <td key="slot" className="slot">
       {cell.slot}
@@ -173,13 +174,22 @@ function DayRow({ player, cell, usual, scale, side }: RowProps) {
         vs {cell.opponent}
         <GameStatus cell={cell} />
       </div>
-      {cell.actual && <div className="meta">{boxLine(cell.stats)}</div>}
-      {cell.actual && cell.value_by_cat && <Drivers byCat={cell.value_by_cat} />}
+      {/* Ruled out: no line to show once his game tips. */}
+      {cell.actual && !cell.out && <div className="meta">{boxLine(cell.stats)}</div>}
+      {cell.actual && !cell.out && cell.value_by_cat && <Drivers byCat={cell.value_by_cat} />}
     </td>,
     <td key="value" className={`num value zcell ${kind} ${shade}`}>
-      <span className="v">{val(value)}</span>
-      {live && cell.projected_value !== null && <div className="meta">proj {val(cell.projected_value)}</div>}
-      {!cell.actual && <div className="meta">proj</div>}
+      {cell.out ? (
+        <span className="v" title="Ruled out this day">
+          ✕
+        </span>
+      ) : (
+        <>
+          <span className="v">{val(value)}</span>
+          {live && cell.projected_value !== null && <div className="meta">proj {val(cell.projected_value)}</div>}
+          {!cell.actual && <div className="meta">proj</div>}
+        </>
+      )}
       {usual !== null && <div className="meta">usual {val(usual)}</div>}
     </td>,
   ];

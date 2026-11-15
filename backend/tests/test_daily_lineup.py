@@ -48,6 +48,23 @@ def test_players_listed_in_lineup_order():
     assert [p.player_id for p in week().players] == [1, 3, 2, 4]
 
 
+def test_ruled_out_days_are_flagged():
+    """Day 2 is today. D is out all week; E is out until day 3, then day-to-day; F has a
+    game but no stat line, so he's missing rather than ruled out."""
+    d = SimPlayer(5, ["PG", "UT"], rates(20), games={2: {}, 3: {}}, p_play=0.0, priority=3)
+    e = SimPlayer(6, ["UT"], rates(10), games={2: {}, 3: {}}, p_play=0.5, out_before=3, priority=2)
+    slots = {(5, 2): "PG", (5, 3): "PG", (6, 2): "UT", (6, 3): "UT", (7, 2): "BE"}
+    opponents = {5: {2: "BOS", 3: "NYK"}, 6: {2: "MIA", 3: "DEN"}, 7: {2: "LAL"}}
+    w = team_week([1, 2, 3], 2, SLOTS, slots, [], {5: d, 6: e}, opponents)
+    by_id = {p.player_id: p for p in w.players}
+    assert [c.out for c in by_id[5].cells] == [False, True, True]
+    assert [c.out for c in by_id[6].cells] == [False, True, False]
+    assert not any(c.out for c in by_id[7].cells)
+    # The ruled-out games add nothing; E's day 3 is half his rate.
+    assert [t["PTS"] for t in w.day_projected] == [0, 0, 5]
+    assert not any(c.out for p in week().players for c in p.cells)  # B is day-to-day, not out
+
+
 def test_today_shows_the_line_so_far_and_projects_the_rest():
     """Day 2 is today. A's game is live with a quarter left; C's game is over."""
     a = SimPlayer(1, ["PG", "UT"], rates(20), games={2: dict.fromkeys(STAT_KEYS, 0.25)}, priority=3)

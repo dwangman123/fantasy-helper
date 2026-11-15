@@ -175,10 +175,15 @@ def test_lineup_values_each_game_on_the_single_game_scale(client):
             assert (c["value"] is not None) == has_game
             if has_game:
                 assert c["value"] == pytest.approx(sum(c["value_by_cat"].values()))
-        counted = [c for c in cells if c["counts"]]
+        # A ruled-out game is worth nothing to the day.
+        counted = [c for c in cells if c["counts"] and not c["out"]]
         assert day["actual_value"] == pytest.approx(sum(c["value"] for c in counted if c["actual"]))
         assert day["projected_value"] == pytest.approx(sum(c["projected_value"] for c in counted))
+        assert all(c["opponent"] for c in cells if c["out"])
+        assert not day["played"] or not any(c["out"] for c in cells)
     assert all(p["usual"] is not None for p in body["players"])
+    # The team's OUT player in the IR slot has a game this week.
+    assert any(c["out"] for p in body["players"] if p["player"]["injury_status"] == "OUT" for c in p["cells"])
 
 
 def test_team_page_profiles_the_roster_and_lists_moves(client):

@@ -117,6 +117,9 @@ export type LineupCell = {
   value: number | null; // of stats
   projected_value: number | null; // of projected
   value_by_cat: Record<string, number> | null;
+  // Ruled out that day (injured, suspended, or before his expected return): the game is worth
+  // nothing and left out of the day's value totals. Today on only.
+  out: boolean;
 };
 
 export type LineupDay = {

@@ -166,6 +166,9 @@ class LineupCell(BaseModel):
     value: float | None  # of `stats`
     projected_value: float | None  # of `projected`
     value_by_cat: dict[str, float] | None  # `value` per category
+    # Ruled out that day (injured, suspended, or before his expected return): his game is
+    # worth nothing and left out of the day's value totals. Today on only.
+    out: bool
 
 
 class LineupPlayer(BaseModel):
