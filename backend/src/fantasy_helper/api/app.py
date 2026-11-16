@@ -695,6 +695,8 @@ def _side_out(ctx: LeagueContext, side: TradeSide) -> s.TradeSideOut:
         sends=players(side.sends),
         drops=players(side.drops),
         adds=players(side.adds),
+        pickup_drops=players(side.pickup_drops),
+        pickup_adds=players(side.pickup_adds),
         cats_per_week=side.cats_per_week,
         d_cats_per_week=side.d_cats_per_week,
         p_week=side.p_week,
@@ -702,6 +704,7 @@ def _side_out(ctx: LeagueContext, side: TradeSide) -> s.TradeSideOut:
         cat_p_win=side.cat_p_win,
         cat_d_p_win=side.cat_d_p_win,
         cat_d_value=side.cat_d_value,
+        d_value=side.d_value,
     )
 
 
@@ -724,6 +727,7 @@ def trade(
     return s.TradeOut(
         me=_side_out(ctx, report.result.me),
         partner=_side_out(ctx, report.result.partner),
+        lopsided=report.result.lopsided,
         weeks=len(later),
         first_period=later[0].matchup_period,
         warnings=report.warnings,
@@ -733,14 +737,18 @@ def trade(
 
 @router.get("/trades", response_model=s.TradesOut)
 def trades(c: CtxDep, team_id: int | None = None):
-    """Deals that help both teams, found by searching 1-for-1 and 2-for-1 trades with every other team."""
+    """Deals that help me and don't hurt the partner, found by searching 1-for-1 and 2-for-1 trades with every
+    other team."""
     team_id = c.settings.my_team_id if team_id is None else team_id
     ctx = c.context()
     ideas: TradeIdeas = c.cache.get(("trades", c.key, team_id), lambda: trade_ideas(ctx, c.outlook(), team_id))
     later = ctx.later_weeks
     return s.TradesOut(
         team_id=team_id,
-        deals=[s.TradeIdea(me=_side_out(ctx, d.me), partner=_side_out(ctx, d.partner)) for d in ideas.search.deals],
+        deals=[
+            s.TradeIdea(me=_side_out(ctx, d.me), partner=_side_out(ctx, d.partner), lopsided=d.lopsided)
+            for d in ideas.search.deals
+        ],
         candidates=ideas.search.candidates,
         evaluated=ideas.search.evaluated,
         weeks=len(later),

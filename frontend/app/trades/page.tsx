@@ -99,7 +99,7 @@ function TradesView() {
       <section className="card">
         <div className="card-head">
           <div>
-            <h2>Deals that help both teams</h2>
+            <h2>Deals that help you without hurting them</h2>
             <div className="sub">
               {t
                 ? `${t.evaluated} of ${t.candidates.toLocaleString()} 1-for-1 and 2-for-1 deals scored in full`
@@ -126,9 +126,17 @@ function TradesView() {
           <ul className="assumptions">
             <li>
               Cats / week is the change in categories won per week against a league-average team; win a week is the
-              change in the chance of winning more categories than that team. A player&apos;s value is his G-score, the
-              same as on the Team page: his z-scores summed, each weighted by how predictable that category is week to
-              week, so steals and the percentages count for less.
+              change in the chance of winning more categories than that team. Both are measured against each
+              team&apos;s best move without a trade (swapping its weakest player for its best free agent), so a deal
+              gets no credit for a pickup either team could make anyway.
+            </li>
+            <li>
+              The number next to each player is his G-score, the same as on the Team page: his z-scores summed, each
+              weighted by how predictable that category is week to week, so steals and the percentages count for less.
+              Their value is how the other manager would likely see the deal: the G-scores they get minus those they
+              send, each counted only above the best free agent. A player below that could be dropped for nothing, so
+              a negative-G throw-in counts 0 instead of making a deal look even. ⚠ marks a deal in which they give up
+              clearly more than they get.
             </li>
             {t.assumptions.map((a) => (
               <li key={a}>{a}</li>
@@ -187,6 +195,12 @@ function Finder({ trades, teams, onOpen }: { trades: Trades; teams: Record<numbe
               <th className="num" title="their change in categories won per week">
                 Them
               </th>
+              <th
+                className="num"
+                title="G-scores they get minus those they send, each counted only above the best free agent"
+              >
+                Their value
+              </th>
               <th className="num hide-sm" title="your change in the chance to win a week">
                 Win a week
               </th>
@@ -210,6 +224,9 @@ function Finder({ trades, teams, onOpen }: { trades: Trades; teams: Record<numbe
                   <DeltaBar value={d.me.d_cats_per_week} max={max} text={signed(d.me.d_cats_per_week)} />
                 </td>
                 <td className="num">{signed(d.partner.d_cats_per_week)}</td>
+                <td className="num">
+                  <Value idea={d} />
+                </td>
                 <td className="num hide-sm">{pts(d.me.d_p_week)}</td>
                 <td className="hide-sm">
                   <Effects deltas={d.me.cat_d_p_win} />
@@ -250,14 +267,37 @@ function Players({ players }: { players: Player[] }) {
   );
 }
 
-// The roster moves a deal forces on one side: a drop to make room, or a pickup for an open spot.
+// The roster moves a deal brings on one side (a drop to make room, a pickup for an open spot), less
+// the pickup it would make without trading, which `Pickup` states.
 function Moves({ side }: { side: TradeSide }) {
+  const anyway = new Set([...side.pickup_adds, ...side.pickup_drops].map((p) => p.player_id));
   const parts = [
-    ...side.adds.map((p) => `picks up ${p.name}`),
-    ...side.drops.map((p) => `drops ${p.name}`),
+    ...side.adds.filter((p) => !anyway.has(p.player_id)).map((p) => `picks up ${p.name}`),
+    ...side.drops.filter((p) => !anyway.has(p.player_id)).map((p) => `drops ${p.name}`),
   ];
   if (!parts.length) return null;
   return <div className="player-meta">then {parts.join(", ")}</div>;
+}
+
+// The partner's value balance, flagged when they give up clearly more than they get.
+function Value({ idea }: { idea: TradeIdea }) {
+  const v = idea.partner.d_value;
+  if (!idea.lopsided) return <>{signed(v, 1)}</>;
+  return (
+    <span
+      className="lopsided"
+      title={`They give up ${Math.abs(v).toFixed(1)} more value than they get; a manager going by player values would likely say no`}
+    >
+      ⚠ {signed(v, 1)}
+    </span>
+  );
+}
+
+// The pickup a side could make without trading, which the deal is measured against.
+function Pickup({ side }: { side: TradeSide }) {
+  if (!side.pickup_adds.length) return null;
+  const swaps = side.pickup_adds.map((p, i) => `${p.name} for ${side.pickup_drops[i]?.name}`);
+  return <div className="player-meta">compared with picking up {swaps.join(", ")}, which needs no trade</div>;
 }
 
 type EvaluatorProps = {
@@ -411,8 +451,9 @@ function TradeResult({ trade, categories, partnerName }: { trade: Trade; categor
             <div className="tile-value">{signed(s.d_cats_per_week)}</div>
             <div className="sub">
               categories won per week (now {s.cats_per_week.toFixed(2)}) · win a week {pts(s.d_p_week)} (now{" "}
-              {pct(s.p_week)})
+              {pct(s.p_week)}) · value {signed(s.d_value, 1)}
             </div>
+            <Pickup side={s} />
             <Moves side={s} />
           </div>
         ))}

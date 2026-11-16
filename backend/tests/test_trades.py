@@ -6,7 +6,9 @@ from sqlalchemy.orm import Session
 
 from fantasy_helper.analytics.matchup import SimPlayer
 from fantasy_helper.analytics.trades import (
+    LOPSIDED,
     MIN_GAIN,
+    PARTNER_MIN_GAIN,
     evaluate_trade,
     find_trades,
     first_order,
@@ -67,7 +69,46 @@ def test_two_for_one_keeps_both_rosters_legal():
     s = league(free_agents=[player(90, PTS=8, STL=1), player(91, PTS=2)])
     r = evaluate_trade(s, 1, 2, [10, 11], [22])
     assert r.me.adds == [90] and r.me.drops == []  # the best free agent fills the spot I opened
-    assert r.partner.drops == [21] and r.partner.adds == []  # their lowest priority outside the deal
+    assert r.partner.drops == [21] and r.partner.adds == []  # their lowest priority, the players they get included
+
+
+def league_with_junk():
+    """`league()` with a fourth roster spot: a near-useless player on teams 1 and 2 (priority -5),
+    a bench player on the others, and one free agent better than any of them."""
+    s = league(spots=4)
+    rosters = {t: list(r) for t, r in s.rosters.items()}
+    rosters[1].append(player(19, priority=-5, PTS=2, STL=0.2))
+    rosters[2].append(player(29, priority=-5, PTS=2, STL=0.2))
+    for t in (3, 4):
+        rosters[t].append(player(t * 10 + 9, priority=-4, PTS=8, STL=0.8))
+    return season([PTS, STL], rosters, WEEKS, SLOTS, 4, [player(90, priority=-1, PTS=12, STL=1.5)])
+
+
+def test_a_pickup_either_team_could_make_isnt_credited_to_the_deal():
+    s = league_with_junk()
+    plain = evaluate_trade(s, 1, 2, [10], [20])
+    # Without a trade I'd swap my junk player for the free agent, so the deal is compared with that...
+    assert (plain.me.pickup_drops, plain.me.pickup_adds) == ([19], [90])
+    assert plain.me.cats_per_week > float(sum(s.cat_p_win[1].values()).mean())
+    # ...and sending him along, to pick up the free agent for the open spot, gains nothing more.
+    padded = evaluate_trade(s, 1, 2, [10, 19], [20])
+    assert padded.me.adds == [90] and padded.me.d_cats_per_week == pytest.approx(plain.me.d_cats_per_week)
+    assert 19 in padded.partner.drops and padded.throw_in  # they'd cut him right away
+    assert padded.me.d_value == plain.me.d_value  # a player below the free agent is worth nothing
+
+
+def test_a_star_plus_a_negative_throw_in_for_a_mid_player_isnt_a_fair_deal():
+    s = league_with_junk()
+    star = replace(s.player(20), priority=6.0)
+    s = season([PTS, STL], {**s.rosters, 2: [star, *s.rosters[2][1:]]}, WEEKS, SLOTS, 4, list(s.fills[1]))
+    # A plain G-score sum calls it even: 6 - 5 = 1, my player's G. Against the free agent (G -1), they give
+    # 7 for 2: the throw-in counts 0, not -4.
+    r = evaluate_trade(s, 1, 2, [10], [20, 29])
+    assert r.partner.d_value == pytest.approx((1 - -1) - (6 - -1)) and r.lopsided
+    assert 29 in r.me.drops and r.throw_in  # I'd cut him right away: it's 10 for 20 with a throw-in
+    found = find_trades(s, 1, tradable={p.player_id for r in s.rosters.values() for p in r})
+    assert not any(d.throw_in for d in found.deals)
+    assert all(not {20, 29} <= set(d.me.receives) for d in found.deals)
 
 
 def test_first_order_estimate_tracks_a_small_swap():
@@ -78,11 +119,13 @@ def test_first_order_estimate_tracks_a_small_swap():
     assert exact > 0 and first_order(s, 1, (10,), (29,)) == pytest.approx(exact, rel=0.2)
 
 
-def test_finder_lists_only_deals_good_for_both_and_skips_untradable_players():
+def test_finder_lists_only_deals_that_help_me_without_hurting_them_and_skips_untradable_players():
     s = league()
     found = find_trades(s, 1, tradable={10, 11, 12, 20, 21, 30, 31, 32, 40, 41, 42})
     assert found.deals and found.evaluated <= found.candidates
-    assert all(min(d.me.d_cats_per_week, d.partner.d_cats_per_week) >= MIN_GAIN for d in found.deals)
+    assert all(d.me.d_cats_per_week >= MIN_GAIN for d in found.deals)
+    assert all(d.partner.d_cats_per_week >= PARTNER_MIN_GAIN for d in found.deals)
+    assert all(d.lopsided == (d.partner.d_value < -LOPSIDED) for d in found.deals)
     assert {d.partner.team_id for d in found.deals} == {2}  # only the thieves fill my hole
     assert all(22 not in d.me.receives for d in found.deals)
     ranked = [d.me.d_cats_per_week for d in found.deals]
@@ -112,7 +155,8 @@ def test_report_checks_the_deal_and_warns_about_injuries(stored):
     mine, theirs = (outlook.rosters[t][0].player_id for t in (MY_TEAM, 7))
     report = trade_report(ctx, outlook, MY_TEAM, 7, [mine], [theirs])
     assert report.result.me.team_id == MY_TEAM and report.warnings == [] and report.assumptions
-    assert report.result.me.drops == []  # the IR player holds no roster spot, so 1-for-1 needs no drop
+    # The IR player holds no roster spot, so 1-for-1 needs no drop for room; any drop is a swap for a free agent.
+    assert len(report.result.me.drops) == len(report.result.me.adds)
     ir = next(p.player_id for p in outlook.rosters[7] if p.ir_back is not None)
     with pytest.raises(ValueError, match="outside the IR slot"):
         trade_report(ctx, outlook, MY_TEAM, 7, [mine], [ir])

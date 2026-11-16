@@ -368,20 +368,24 @@ class TradeSideOut(BaseModel):
     team_id: int
     receives: list[PlayerOut]
     sends: list[PlayerOut]
-    drops: list[PlayerOut]  # dropped to make room
-    adds: list[PlayerOut]  # free agents picked up for the spots the deal opens
-    cats_per_week: float  # before the deal, vs a league-average team
+    drops: list[PlayerOut]  # dropped to make room, or for a free agent
+    adds: list[PlayerOut]  # free agents picked up, for the spots the deal opens or for a drop
+    pickup_drops: list[PlayerOut]  # the no-trade option the deal is compared with: these dropped...
+    pickup_adds: list[PlayerOut]  # ...for these free agents
+    cats_per_week: float  # with no trade (after the pickups), vs a league-average team
     d_cats_per_week: float
-    p_week: float  # mean P(win a week) vs a league-average team, before the deal
+    p_week: float  # mean P(win a week) vs a league-average team, with no trade
     d_p_week: float
     cat_p_win: dict[str, float]
     cat_d_p_win: dict[str, float]
     cat_d_value: dict[str, float]  # change in the expected weekly total; percentages: in the percentage
+    d_value: float  # G-score above the best free agent (0 below him), received minus sent
 
 
 class TradeOut(BaseModel):
     me: TradeSideOut
     partner: TradeSideOut
+    lopsided: bool  # the partner gives up clearly more value than they get
     weeks: int
     first_period: int
     warnings: list[str]
@@ -391,11 +395,12 @@ class TradeOut(BaseModel):
 class TradeIdea(BaseModel):
     me: TradeSideOut
     partner: TradeSideOut
+    lopsided: bool  # the partner gives up clearly more value than they get
 
 
 class TradesOut(BaseModel):
     team_id: int
-    deals: list[TradeIdea]  # both sides gain; best for me first
+    deals: list[TradeIdea]  # good for me, not bad for the partner; best for me first
     candidates: int  # deals screened
     evaluated: int  # deals scored in full
     weeks: int
