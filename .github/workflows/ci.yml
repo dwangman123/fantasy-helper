@@ -113,7 +113,7 @@ jobs:
           # Outside Lambda nothing buffers the response: the 4 events are 0.5 s apart, so the
           # first must arrive well before the last.
           curl --fail --silent --show-error --no-buffer localhost:8080/api/health/stream \
-            | while read -r line; do [ -n "$line" ] && echo "$(date +%s.%N) $line"; done > events.txt
+            | while read -r line; do if [ -n "$line" ]; then echo "$(date +%s.%N) $line"; fi; done > events.txt
           cat events.txt
           [ "$(wc -l < events.txt)" -eq 4 ]
           awk 'NR == 1 { first = $1 } END { exit !($1 - first > 1) }' events.txt
