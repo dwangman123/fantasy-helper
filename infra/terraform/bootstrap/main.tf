@@ -83,11 +83,11 @@ resource "aws_ecr_lifecycle_policy" "app" {
   policy = jsonencode({
     rules = [{
       rulePriority = 1
-      description  = "Keep the last 5 images"
+      description  = "Keep the last 10 images: each deploy pushes two, the API's and the ingest's"
       selection = {
         tagStatus   = "any"
         countType   = "imageCountMoreThan"
-        countNumber = 5
+        countNumber = 10
       }
       action = { type = "expire" }
     }]
