@@ -368,18 +368,17 @@ class TradeSideOut(BaseModel):
     team_id: int
     receives: list[PlayerOut]
     sends: list[PlayerOut]
-    drops: list[PlayerOut]  # dropped to make room, or for a free agent
-    adds: list[PlayerOut]  # free agents picked up, for the spots the deal opens or for a drop
-    pickup_drops: list[PlayerOut]  # the no-trade option the deal is compared with: these dropped...
-    pickup_adds: list[PlayerOut]  # ...for these free agents
-    cats_per_week: float  # with no trade (after the pickups), vs a league-average team
-    d_cats_per_week: float
-    p_week: float  # mean P(win a week) vs a league-average team, with no trade
+    drops: list[PlayerOut]  # dropped to make room
+    opened: int  # roster spots the deal opens, each holding a replacement-level player
+    below_replacement: list[PlayerOut]  # players received who count only as replacement level here
+    cats_per_week: float  # before the deal, as rostered, vs a league-average team
+    d_cats_per_week: float  # with players below replacement counted at it, before and after
+    p_week: float  # mean P(win a week) vs a league-average team, before the deal
     d_p_week: float
     cat_p_win: dict[str, float]
     cat_d_p_win: dict[str, float]
     cat_d_value: dict[str, float]  # change in the expected weekly total; percentages: in the percentage
-    d_value: float  # G-score above the best free agent (0 below him), received minus sent
+    d_value: float  # G-score above replacement level (0 below it), received minus sent
 
 
 class TradeOut(BaseModel):

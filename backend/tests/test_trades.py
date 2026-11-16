@@ -56,7 +56,7 @@ def test_a_scorer_for_a_thief_helps_both_teams():
     assert r.me.d_cats_per_week > 0.1 and r.partner.d_cats_per_week > 0.1
     assert r.me.cat_d_p_win["STL"] > 0 > r.me.cat_d_p_win["PTS"]
     assert r.me.cat_d_value["PTS"] == pytest.approx(-42) and r.me.cat_d_value["STL"] == pytest.approx(6.3)
-    assert r.me.d_p_week > 0 and (r.me.drops, r.me.adds) == ([], [])
+    assert r.me.d_p_week > 0 and (r.me.drops, r.me.opened, r.me.below_replacement) == ([], 0, [])
 
 
 def test_trade_reads_the_same_from_either_side():
@@ -68,47 +68,56 @@ def test_trade_reads_the_same_from_either_side():
 def test_two_for_one_keeps_both_rosters_legal():
     s = league(free_agents=[player(90, PTS=8, STL=1), player(91, PTS=2)])
     r = evaluate_trade(s, 1, 2, [10, 11], [22])
-    assert r.me.adds == [90] and r.me.drops == []  # the best free agent fills the spot I opened
-    assert r.partner.drops == [21] and r.partner.adds == []  # their lowest priority, the players they get included
+    assert r.me.opened == 1 and r.me.drops == []  # a replacement-level player holds the spot I opened
+    assert r.partner.drops == [21] and r.partner.opened == 0  # their lowest priority, the players they get included
 
 
-def league_with_junk():
+def free_agent():
+    return player(90, priority=-1, PTS=12, STL=1.5)
+
+
+def league_with_junk(changes: dict[int, dict] | None = None):
     """`league()` with a fourth roster spot: a near-useless player on teams 1 and 2 (priority -5),
-    a bench player on the others, and one free agent better than any of them."""
+    a bench player on the others, and one free agent better than any of them, who sets
+    replacement level. `changes`: player id -> fields to replace."""
     s = league(spots=4)
     rosters = {t: list(r) for t, r in s.rosters.items()}
     rosters[1].append(player(19, priority=-5, PTS=2, STL=0.2))
     rosters[2].append(player(29, priority=-5, PTS=2, STL=0.2))
     for t in (3, 4):
         rosters[t].append(player(t * 10 + 9, priority=-4, PTS=8, STL=0.8))
-    return season([PTS, STL], rosters, WEEKS, SLOTS, 4, [player(90, priority=-1, PTS=12, STL=1.5)])
+    rosters = {t: [replace(p, **(changes or {}).get(p.player_id, {})) for p in r] for t, r in rosters.items()}
+    return season([PTS, STL], rosters, WEEKS, SLOTS, 4, [free_agent()])
 
 
-def test_a_pickup_either_team_could_make_isnt_credited_to_the_deal():
+def test_dumping_a_player_below_replacement_gains_nothing():
     s = league_with_junk()
+    assert s.replacement.priority == -1 and s.below[1] == {19} and s.below[2] == {29}
+    # Team 1 is far ahead in PTS, so to first order its scorers add less than the free agent's steals;
+    # their G-scores (1, 0, -1) aren't below his, so they still count in full.
+    assert all(s.values[1][pid] < s.values[1][-1] for pid in (10, 11, 12))
     plain = evaluate_trade(s, 1, 2, [10], [20])
-    # Without a trade I'd swap my junk player for the free agent, so the deal is compared with that...
-    assert (plain.me.pickup_drops, plain.me.pickup_adds) == ([19], [90])
-    assert plain.me.cats_per_week > float(sum(s.cat_p_win[1].values()).mean())
-    # ...and sending him along, to pick up the free agent for the open spot, gains nothing more.
+    assert plain.me.cats_per_week == pytest.approx(float(sum(s.cat_p_win[1].values()).mean()))  # as rostered
+    # Sending my junk player along opens a spot, which a replacement-level player holds; he counted as
+    # one already, so the deal gains me nothing more.
     padded = evaluate_trade(s, 1, 2, [10, 19], [20])
-    assert padded.me.adds == [90] and padded.me.d_cats_per_week == pytest.approx(plain.me.d_cats_per_week)
-    assert 19 in padded.partner.drops and padded.throw_in  # they'd cut him right away
-    assert padded.me.d_value == plain.me.d_value  # a player below the free agent is worth nothing
+    assert padded.me.opened == 1 and padded.me.d_cats_per_week == pytest.approx(plain.me.d_cats_per_week)
+    # Taking him on costs them nothing either: he counts as replacement level, like the junk player they drop.
+    assert padded.partner.d_cats_per_week == pytest.approx(plain.partner.d_cats_per_week)
+    assert padded.partner.drops == [29] and padded.partner.below_replacement == [19] and padded.throw_in
+    assert padded.me.d_value == plain.me.d_value  # a player below replacement is worth nothing
 
 
 def test_a_star_plus_a_negative_throw_in_for_a_mid_player_isnt_a_fair_deal():
-    s = league_with_junk()
-    star = replace(s.player(20), priority=6.0)
-    s = season([PTS, STL], {**s.rosters, 2: [star, *s.rosters[2][1:]]}, WEEKS, SLOTS, 4, list(s.fills[1]))
-    # A plain G-score sum calls it even: 6 - 5 = 1, my player's G. Against the free agent (G -1), they give
+    s = league_with_junk({20: {"priority": 6.0}})
+    # A plain G-score sum calls it even: 6 - 5 = 1, my player's G. Above replacement (G -1), they give
     # 7 for 2: the throw-in counts 0, not -4.
     r = evaluate_trade(s, 1, 2, [10], [20, 29])
     assert r.partner.d_value == pytest.approx((1 - -1) - (6 - -1)) and r.lopsided
-    assert 29 in r.me.drops and r.throw_in  # I'd cut him right away: it's 10 for 20 with a throw-in
+    assert 29 in r.me.drops + r.me.below_replacement and r.throw_in  # it's 10 for 20 with a throw-in
     found = find_trades(s, 1, tradable={p.player_id for r in s.rosters.values() for p in r})
     assert not any(d.throw_in for d in found.deals)
-    assert all(not {20, 29} <= set(d.me.receives) for d in found.deals)
+    assert all(29 not in d.me.receives for d in found.deals)
 
 
 def test_first_order_estimate_tracks_a_small_swap():
@@ -147,16 +156,23 @@ def test_outlook_covers_the_weeks_after_this_one(stored):
     assert len(outlook.rosters) == 10 and all(sum(p.ir_back is None for p in r) == 13 for r in outlook.rosters.values())
     # Each team's IR player has no return date in the fixture, so he's back after this week.
     assert all([p.ir_back for p in r if p.ir_back] == [outlook.weeks[0][0]] for r in outlook.rosters.values())
-    assert all(fills for fills in outlook.fills.values())
+    assert outlook.replacement is not None and outlook.replacement.priority < 0  # free agents trail the rostered
 
 
 def test_report_checks_the_deal_and_warns_about_injuries(stored):
     ctx, outlook = stored
-    mine, theirs = (outlook.rosters[t][0].player_id for t in (MY_TEAM, 7))
+    mine = outlook.rosters[MY_TEAM][0].player_id
+    # Someone worth having to me, and no more to them than what they get, so nothing to warn about.
+    theirs = next(
+        p.player_id
+        for p in outlook.rosters[7]
+        if p.ir_back is None
+        and not outlook.below_replacement(MY_TEAM, p.player_id)
+        and outlook.value([p.player_id]) <= outlook.value([mine])
+    )
     report = trade_report(ctx, outlook, MY_TEAM, 7, [mine], [theirs])
     assert report.result.me.team_id == MY_TEAM and report.warnings == [] and report.assumptions
-    # The IR player holds no roster spot, so 1-for-1 needs no drop for room; any drop is a swap for a free agent.
-    assert len(report.result.me.drops) == len(report.result.me.adds)
+    assert report.result.me.drops == []  # the IR player holds no roster spot, so 1-for-1 needs no drop
     ir = next(p.player_id for p in outlook.rosters[7] if p.ir_back is not None)
     with pytest.raises(ValueError, match="outside the IR slot"):
         trade_report(ctx, outlook, MY_TEAM, 7, [mine], [ir])
@@ -171,11 +187,11 @@ def test_report_checks_the_deal_and_warns_about_injuries(stored):
     assert "is out with no return date listed" in warning
     back = ctx.calendar.week(ctx.matchup_period + 2).start
     dated = replace(out, injuries={theirs: Injury(theirs, back, False, "Knee")})
-    [warning] = trade_report(dated, season_outlook(dated), MY_TEAM, 7, [mine], [theirs]).warnings
-    assert f"out until {back:%b} {back.day}" in warning
+    warnings = trade_report(dated, season_outlook(dated), MY_TEAM, 7, [mine], [theirs]).warnings
+    assert any(f"out until {back:%b} {back.day}" in w for w in warnings)
     gone = replace(out, injuries={theirs: Injury(theirs, None, True, "Knee")})
-    [warning] = trade_report(gone, season_outlook(gone), MY_TEAM, 7, [mine], [theirs]).warnings
-    assert "out for the season" in warning
+    warnings = trade_report(gone, season_outlook(gone), MY_TEAM, 7, [mine], [theirs]).warnings
+    assert any("out for the season" in w for w in warnings)
 
 
 def test_ideas_leave_out_players_whose_value_cant_be_told(stored):
