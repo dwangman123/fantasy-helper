@@ -304,11 +304,10 @@ def test_trade_scores_both_sides(client):
     me = [p["player"]["player_id"] for p in client.get("/api/team").json()["players"] if p["slot"] != "IR"]
     them = [p["player"]["player_id"] for p in client.get("/api/team", params={"team_id": 7}).json()["players"]]
     body = client.get("/api/trade", params={"partner_id": 7, "give": me[:2], "get": them[:1]}).json()
-    assert [p["player_id"] for p in body["me"]["sends"]] == me[:2] and len(body["me"]["adds"]) == 1
-    # They get 2 for 1, so one drop makes room; any other drop is a swap for a free agent.
-    partner = body["partner"]
-    assert [p["player_id"] for p in partner["sends"]] == them[:1] and len(partner["drops"]) == len(partner["adds"]) + 1
-    assert len(partner["pickup_drops"]) == len(partner["pickup_adds"])
+    assert [p["player_id"] for p in body["me"]["sends"]] == me[:2] and body["me"]["opened"] == 1
+    partner = body["partner"]  # they get 2 for 1, so one drop makes room
+    assert [p["player_id"] for p in partner["sends"]] == them[:1] and len(partner["drops"]) == 1
+    assert partner["opened"] == 0 and isinstance(partner["below_replacement"], list)
     assert body["me"]["d_value"] == pytest.approx(-partner["d_value"])  # the same players, seen from each side
     assert body["lopsided"] == (partner["d_value"] < -LOPSIDED)
     assert set(body["me"]["cat_d_p_win"]) == {c["key"] for c in client.get("/api/league").json()["categories"]}

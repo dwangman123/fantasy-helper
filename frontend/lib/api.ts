@@ -249,18 +249,17 @@ export type TradeSide = {
   team_id: number;
   receives: Player[];
   sends: Player[];
-  drops: Player[]; // dropped to make room, or for a free agent
-  adds: Player[]; // free agents picked up, for the spots the deal opens or for a drop
-  pickup_drops: Player[]; // the no-trade option the deal is compared with: these dropped...
-  pickup_adds: Player[]; // ...for these free agents
-  cats_per_week: number; // with no trade (after the pickups), vs a league-average team
-  d_cats_per_week: number;
-  p_week: number; // P(win a week) vs a league-average team, with no trade
+  drops: Player[]; // dropped to make room
+  opened: number; // roster spots the deal opens, each holding a replacement-level player
+  below_replacement: Player[]; // players received who count only as replacement level here
+  cats_per_week: number; // before the deal, as rostered, vs a league-average team
+  d_cats_per_week: number; // with players below replacement counted at it, before and after
+  p_week: number; // P(win a week) vs a league-average team, before the deal
   d_p_week: number;
   cat_p_win: Record<string, number>;
   cat_d_p_win: Record<string, number>;
   cat_d_value: Record<string, number>; // change in the expected weekly total; percentages: in the percentage
-  d_value: number; // G-score above the best free agent (0 below him), received minus sent
+  d_value: number; // G-score above replacement level (0 below it), received minus sent
 };
 
 // lopsided: the partner gives up clearly more value than they get, so they'd likely say no.
