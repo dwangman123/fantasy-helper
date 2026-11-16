@@ -3,14 +3,16 @@
 A deal is scored the way Hold scores a pickup (see `analytics/trades.py`): the change in
 expected categories won per week against a league-average team, for both sides, over
 the weeks after this one, with injured players counted from ESPN's expected return
-(`LeagueContext.return_period`). Each report carries the assumptions behind it so the UI
-can state them.
+(`LeagueContext.return_period`). Each side is compared with its best free-agent pickup,
+which needs no trade, and the deal's value balance shows how the other manager would
+likely see it. Each report carries the assumptions behind it so the UI can state them.
 """
 
 from dataclasses import dataclass, field
 
 from fantasy_helper.analytics.matchup import SimPlayer
 from fantasy_helper.analytics.trades import (
+    LOPSIDED,
     MIN_GAIN,
     PER_SHAPE,
     Season,
@@ -69,17 +71,28 @@ def _warning(ctx: LeagueContext, player_id: int) -> str:
     return f"{p.name} is out for the season; the score counts no games for him."
 
 
-def _assumptions(ctx: LeagueContext) -> list[str]:
+def _replacement(ctx: LeagueContext, outlook: Season) -> str:
+    r = outlook.replacement
+    return f"{ctx.players[r.player_id].name}, {r.priority:.1f}" if r else "none listed"
+
+
+def _assumptions(ctx: LeagueContext, outlook: Season) -> list[str]:
     later = ctx.later_weeks
     return [
         f"Scored over weeks {later[0].matchup_period}-{later[-1].matchup_period} (playoffs included) against a "
         "league-average team. This week is left out: when ESPN processes a trade in this league isn't verified.",
         injury_assumption(ctx),
-        "A team that gets more players than it sends drops its lowest-value players outside the deal; a team that "
-        "sends more picks up its best free agents for the open spots.",
+        "Each team is compared with its best move that needs no trade: swapping its lowest-value player for its "
+        "best free agent, when that helps. So a deal gets no credit for a pickup either team could make anyway. "
+        "Each team is assumed able to get its best free agent, though only one team can get a given player.",
+        "A team that gets more players than it sends drops its lowest-value players, ones it just got included; a "
+        "team that sends more picks up its best free agents for the open spots.",
         "The league average is recomputed with both rosters after the deal.",
         "Win a week is the chance to win more categories than a league-average team, treating the nine categories "
         "as independent.",
+        "Value is how a manager going by player values would likely see a deal: each player's G-score above the "
+        f"best free agent a team would pick up ({_replacement(ctx, outlook)}), and 0 for a player below him, who "
+        "could be dropped for nothing. A negative-G throw-in adds nothing to a deal.",
         "The other manager may value players differently; a deal that helps both teams here can still be turned down.",
     ]
 
@@ -107,7 +120,17 @@ def trade_report(
             raise ValueError(f"Players sent by team {t} must be on its roster, outside the IR slot")
     warnings = [_warning(ctx, pid) for pid in [*give, *get] if _out(ctx, pid)]
     result = evaluate_trade(outlook, team_id, partner_id, give, get)
-    return TradeReport(team_id, partner_id, result, warnings, _assumptions(ctx))
+    for who, side in (("You", result.me), ("They", result.partner)):
+        for pid in side.receives:
+            if pid in side.drops:
+                name = ctx.players[pid].name
+                warnings.append(f"{who}'d drop {name} right after the deal, so it's the same as the deal without him.")
+    if result.lopsided:
+        warnings.append(
+            f"They give up {-result.partner.d_value:.1f} more value than they get (G-score above the best free agent, "
+            f"{_replacement(ctx, outlook)}); a manager going by player values would likely say no."
+        )
+    return TradeReport(team_id, partner_id, result, warnings, _assumptions(ctx, outlook))
 
 
 @dataclass
@@ -127,7 +150,10 @@ def trade_ideas(ctx: LeagueContext, outlook: Season, team_id: int, per_shape: in
         f"A quick estimate screens them and the {search.evaluated} most promising are scored in full, so a good "
         "deal can be missed. Players in the IR slot, out for the season or hurt with no return date listed are "
         "left out.",
-        f"Listed deals help both teams by at least {MIN_GAIN:g} categories a week, best for you first; each "
-        "player or pair you'd get shows its best package.",
+        f"Listed deals help you by at least {MIN_GAIN:g} categories a week and don't hurt the other team, best for "
+        "you first; each player or pair you'd get shows its best package. A deal in which a team would drop a player "
+        "it just got is left out: it's the same as the deal without him.",
+        f"⚠ marks a deal in which the other team gives up over {LOPSIDED:.1f} more value than it gets; the model "
+        "says it doesn't hurt them, but a manager going by player values would likely say no.",
     ]
-    return TradeIdeas(team_id, search, notes + _assumptions(ctx))
+    return TradeIdeas(team_id, search, notes + _assumptions(ctx, outlook))

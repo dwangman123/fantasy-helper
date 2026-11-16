@@ -249,24 +249,28 @@ export type TradeSide = {
   team_id: number;
   receives: Player[];
   sends: Player[];
-  drops: Player[]; // dropped to make room
-  adds: Player[]; // free agents picked up for the spots the deal opens
-  cats_per_week: number; // before the deal, vs a league-average team
+  drops: Player[]; // dropped to make room, or for a free agent
+  adds: Player[]; // free agents picked up, for the spots the deal opens or for a drop
+  pickup_drops: Player[]; // the no-trade option the deal is compared with: these dropped...
+  pickup_adds: Player[]; // ...for these free agents
+  cats_per_week: number; // with no trade (after the pickups), vs a league-average team
   d_cats_per_week: number;
-  p_week: number; // P(win a week) vs a league-average team, before the deal
+  p_week: number; // P(win a week) vs a league-average team, with no trade
   d_p_week: number;
   cat_p_win: Record<string, number>;
   cat_d_p_win: Record<string, number>;
   cat_d_value: Record<string, number>; // change in the expected weekly total; percentages: in the percentage
+  d_value: number; // G-score above the best free agent (0 below him), received minus sent
 };
 
-export type TradeIdea = { me: TradeSide; partner: TradeSide };
+// lopsided: the partner gives up clearly more value than they get, so they'd likely say no.
+export type TradeIdea = { me: TradeSide; partner: TradeSide; lopsided: boolean };
 
 export type Trade = TradeIdea & { weeks: number; first_period: number; warnings: string[]; assumptions: string[] };
 
 export type Trades = {
   team_id: number;
-  deals: TradeIdea[]; // both sides gain; best for me first
+  deals: TradeIdea[]; // good for me, not bad for the partner; best for me first
   candidates: number;
   evaluated: number;
   weeks: number;

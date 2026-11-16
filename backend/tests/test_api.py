@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from fantasy_helper.analytics.actuals import week_actuals
-from fantasy_helper.analytics.trades import MIN_GAIN
+from fantasy_helper.analytics.trades import LOPSIDED, MIN_GAIN, PARTNER_MIN_GAIN
 from fantasy_helper.api.app import SnapshotCache, create_app
 from fantasy_helper.calendar import load_calendar
 from fantasy_helper.config import Settings
@@ -305,18 +305,24 @@ def test_trade_scores_both_sides(client):
     them = [p["player"]["player_id"] for p in client.get("/api/team", params={"team_id": 7}).json()["players"]]
     body = client.get("/api/trade", params={"partner_id": 7, "give": me[:2], "get": them[:1]}).json()
     assert [p["player_id"] for p in body["me"]["sends"]] == me[:2] and len(body["me"]["adds"]) == 1
-    assert [p["player_id"] for p in body["partner"]["sends"]] == them[:1] and len(body["partner"]["drops"]) == 1
+    # They get 2 for 1, so one drop makes room; any other drop is a swap for a free agent.
+    partner = body["partner"]
+    assert [p["player_id"] for p in partner["sends"]] == them[:1] and len(partner["drops"]) == len(partner["adds"]) + 1
+    assert len(partner["pickup_drops"]) == len(partner["pickup_adds"])
+    assert body["me"]["d_value"] == pytest.approx(-partner["d_value"])  # the same players, seen from each side
+    assert body["lopsided"] == (partner["d_value"] < -LOPSIDED)
     assert set(body["me"]["cat_d_p_win"]) == {c["key"] for c in client.get("/api/league").json()["categories"]}
     assert body["first_period"] == 4 and body["assumptions"]
     bad = client.get("/api/trade", params={"partner_id": 7, "give": them[:1], "get": me[:1]})
     assert bad.status_code == 400 and "roster" in bad.json()["detail"]
 
 
-def test_trades_lists_deals_good_for_both_teams(client):
+def test_trades_lists_deals_that_help_me_without_hurting_them(client):
     body = client.get("/api/trades").json()
     assert body["team_id"] == MY_TEAM and body["candidates"] >= body["evaluated"] > 0 and body["assumptions"]
     assert body["deals"]
     for d in body["deals"]:
         assert d["me"]["team_id"] == MY_TEAM and d["partner"]["team_id"] != MY_TEAM
-        assert min(d["me"]["d_cats_per_week"], d["partner"]["d_cats_per_week"]) >= MIN_GAIN
+        assert d["me"]["d_cats_per_week"] >= MIN_GAIN and d["partner"]["d_cats_per_week"] >= PARTNER_MIN_GAIN
+        assert d["lopsided"] == (d["partner"]["d_value"] < -LOPSIDED)
     assert client.get("/api/trades", params={"team_id": 99}).status_code == 404

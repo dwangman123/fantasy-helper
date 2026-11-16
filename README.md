@@ -51,12 +51,14 @@ games ended).
 **Week 4 (trades, League page): done.** A trade is scored for both teams the way Hold scores a
 pickup: the change in expected categories won per week against a league-average team over the
 rest of the season, plus the change in the chance to win a week, with each side's forced roster
-moves (a drop to make room, or a free agent for an open spot). The Trades page lists deals found by
-searching every 1-for-1 and 2-for-1 trade with every other team and keeping those that help both
-sides, and evaluates any deal of up to 3 players a side. The League page has power rankings
-(rest-of-season all-play strength next to the all-play record so far) and a 10-team category
-heatmap with punts marked. The measure can call a lopsided deal a gain for a team that punts the
-star's categories, so each player's G-score value is shown next to him (see PROJECT_PLAN.md).
+moves (a drop to make room, or a free agent for an open spot). Each side is compared with its best
+free-agent pickup, which needs no trade, so a deal isn't credited with one. The Trades page lists
+deals found by searching every 1-for-1 and 2-for-1 trade with every other team and keeping those
+that help me without hurting the partner, and evaluates any deal of up to 3 players a side. The
+League page has power rankings (rest-of-season all-play strength next to the all-play record so
+far) and a 10-team category heatmap with punts marked. The measure can call a lopsided deal a gain
+for a team that punts the star's categories, so each deal shows the partner's value balance: G-scores
+above the best free agent, received minus sent, with lopsided ones marked (see PROJECT_PLAN.md).
 
 **Week 6 (AWS deploy): built, not yet applied.** Terraform in `infra/terraform/` runs the backend
 as one container image on two AWS Lambda functions: the REST API behind a public function URL,

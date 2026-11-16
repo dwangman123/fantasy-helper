@@ -971,6 +971,11 @@ a.info:hover {
   gap: 2px;
 }
 
+.lopsided {
+  color: var(--warning);
+  white-space: nowrap;
+}
+
 .trade-side {
   border: 1px solid var(--border);
   border-radius: 8px;
