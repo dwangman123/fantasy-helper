@@ -107,7 +107,9 @@ jobs:
         run: |
           docker run -d --name api -p 8080:8080 fantasy-helper:ci
           trap 'docker logs api' EXIT
-          curl --fail --silent --show-error --retry 10 --retry-delay 1 --retry-connrefused localhost:8080/api/health
+          # Until the server is listening, Docker's port forward resets the connection, which
+          # curl only retries with --retry-all-errors.
+          curl --fail --silent --show-error --retry 20 --retry-delay 1 --retry-all-errors localhost:8080/api/health
           # Outside Lambda nothing buffers the response: the 4 events are 0.5 s apart, so the
           # first must arrive well before the last.
           curl --fail --silent --show-error --no-buffer localhost:8080/api/health/stream \
