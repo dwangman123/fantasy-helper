@@ -2,7 +2,7 @@
 
 The Python 3.12 package `fantasy_helper` does four jobs. It pulls the league from ESPN, stores it with SQLAlchemy (SQLite locally, Postgres when deployed), runs the analytics on the stored copy and serves the results over a FastAPI REST API.
 
-Setup, quickstart commands and the AWS deploy are in the [root README](../README.md). This file maps the code. Each module opens with a docstring that explains its method, so this README points to those docstrings rather than repeating them.
+Setup and quickstart commands are in [docs/development.md](../docs/development.md), and the AWS deploy is in [docs/deploy.md](../docs/deploy.md). This file maps the code. Each module opens with a docstring that explains its method, so this README points to those docstrings rather than repeating them.
 
 ## Data flow
 
