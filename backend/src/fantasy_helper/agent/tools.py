@@ -12,9 +12,6 @@ weekly stats to 1 decimal, FG% and FT% in percent to 1 decimal.
 
 Argument schemas follow OpenAI's strict mode: every object closes its properties
 (`additionalProperties: false`) and lists them all as required, with optional ones nullable.
-
-The trade tools are `gated`: the Trades page sits behind a password (frontend/proxy.ts), so the
-agent offers them only when its caller allows (`tools_for`).
 """
 
 import json
@@ -461,7 +458,6 @@ class Tool:
     description: str
     parameters: dict[str, Any]
     run: Callable[..., dict[str, Any]]  # (ctx, names, **arguments)
-    gated: bool = False  # offered only when the caller allows (the trade tools)
 
 
 TOOLS = [
@@ -529,7 +525,6 @@ TOOLS = [
             }
         ),
         evaluate_trade,
-        gated=True,
     ),
     Tool(
         "find_trades",
@@ -537,22 +532,16 @@ TOOLS = [
         "partner, best first.",
         _schema({"team": TEAM}),
         find_trades,
-        gated=True,
     ),
 ]
 BY_NAME = {t.name: t for t in TOOLS}
 
 
-def tools_for(include_gated: bool = False) -> list[Tool]:
-    return [t for t in TOOLS if include_gated or not t.gated]
-
-
-def run_tool(c: Ctx, name: str, arguments: dict[str, Any], allowed: list[Tool] | None = None) -> dict[str, Any]:
+def run_tool(c: Ctx, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     """A tool's result, or {"error": ...} for a bad name or argument, which the model can act on."""
-    offered = {t.name: t for t in (allowed if allowed is not None else tools_for())}
-    tool = offered.get(name)
+    tool = BY_NAME.get(name)
     if tool is None:
-        return {"error": f"No tool {name!r}; available: {', '.join(offered)}"}
+        return {"error": f"No tool {name!r}; available: {', '.join(BY_NAME)}"}
     unknown = set(arguments) - set(tool.parameters["properties"])
     if unknown:
         return {"error": f"Unknown arguments for {name}: {', '.join(sorted(unknown))}"}

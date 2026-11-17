@@ -18,7 +18,6 @@ from fantasy_helper.agent.tools import (
     pct,
     result_text,
     run_tool,
-    tools_for,
 )
 from fantasy_helper.api.app import Ctx, SnapshotCache, create_app
 from fantasy_helper.config import Settings
@@ -60,7 +59,7 @@ def ctx(engine, settings):
 
 
 def call(ctx, name, **arguments):
-    return run_tool(ctx, name, arguments, allowed=TOOLS)
+    return run_tool(ctx, name, arguments)
 
 
 def roster(ctx, team_id):
@@ -100,13 +99,6 @@ def test_every_schema_is_strict(tool):
     assert tool.parameters["type"] == "object"
     assert _strict_problems(tool.parameters) == []
     assert tool.name.replace("_", "").isalpha() and tool.description
-
-
-def test_trade_tools_are_offered_only_when_allowed(ctx):
-    assert {t.name for t in TOOLS} - {t.name for t in tools_for()} == {"evaluate_trade", "find_trades"}
-    assert {t.name for t in tools_for(include_gated=True)} == {t.name for t in TOOLS}
-    refused = run_tool(ctx, "find_trades", {"team": None})  # the default set
-    assert "No tool 'find_trades'" in refused["error"] and "find_trades" not in refused["error"].split(": ")[1]
 
 
 def test_bad_names_and_arguments_come_back_as_errors(ctx):
