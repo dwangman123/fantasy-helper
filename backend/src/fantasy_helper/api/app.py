@@ -898,14 +898,25 @@ def waivers(c: CtxDep, team_id: int | None = None, same_day: bool = False):
     )
 
 
-def create_app(session_factory: sessionmaker | None = None, settings: Settings | None = None) -> FastAPI:
+def create_app(
+    session_factory: sessionmaker | None = None,
+    settings: Settings | None = None,
+    agent_model: Callable[[Settings], Any] | None = None,
+) -> FastAPI:
+    """`agent_model` makes the chat's model from the settings; OpenAI unless a test passes its own."""
+    # Here, not at the top: the agent's modules import this one.
+    from fantasy_helper.agent.routes import openai_model
+    from fantasy_helper.agent.routes import router as agent_router
+
     app = FastAPI(title="Fantasy Helper", version="0.1.0")
     app.state.sessionmaker = session_factory or get_sessionmaker()
     app.state.settings = settings or get_settings()
     app.state.cache = SnapshotCache()
     app.state.refresh_lock = threading.Lock()
     app.state.stream_interval = STREAM_INTERVAL_SECONDS
+    app.state.agent_model_factory = agent_model or openai_model
     app.include_router(router)
+    app.include_router(agent_router)
 
     @app.exception_handler(LookupError)
     def not_found(_: Request, exc: LookupError) -> JSONResponse:

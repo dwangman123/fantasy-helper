@@ -39,6 +39,25 @@ class Settings(BaseSettings):
     # of fetching again. Off locally; the deployed API sets it, since anyone can press Refresh.
     refresh_cooldown_seconds: int = 0
 
+    # The chat agent (agent/). Off until the key, the model and its prices are all set; the
+    # prices are USD per million tokens, from OpenAI's pricing page, and price each turn.
+    openai_api_key: str | None = None
+    agent_model: str | None = None
+    agent_input_price: float | None = None
+    agent_cached_input_price: float | None = None
+    agent_output_price: float | None = None
+    agent_reasoning_effort: str | None = None  # e.g. "low"; left out of requests when unset
+    # Reasoning models count their reasoning against this too, so it's generous.
+    agent_max_output_tokens: int = 8000
+    agent_max_steps: int = 6  # model calls per turn; the last can't call tools
+    # Below the API function's 90 s timeout (infra/terraform), with room to send the last events.
+    agent_deadline_seconds: float = 75.0
+
+    @property
+    def agent_configured(self) -> bool:
+        prices = (self.agent_input_price, self.agent_cached_input_price, self.agent_output_price)
+        return bool(self.openai_api_key and self.agent_model) and None not in prices
+
     @field_validator("database_url")
     @classmethod
     def _psycopg_driver(cls, url: str) -> str:
