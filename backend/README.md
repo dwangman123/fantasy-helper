@@ -65,7 +65,9 @@ When deployed, the [`Dockerfile`](Dockerfile) builds two images from one base. T
 | [`fit_bounce.py`](src/fantasy_helper/fit_bounce.py) | `fh-fit-bounce`: fit each category's weekly bounce from last season's ESPN game logs, for the G-score weights |
 | [`api/app.py`](src/fantasy_helper/api/app.py) | FastAPI routes; `fh-api` |
 | [`api/schemas.py`](src/fantasy_helper/api/schemas.py) | Response models, each from one team's side ("me" / "opp") |
-| [`aws.py`](src/fantasy_helper/aws.py) | Lambda entry points |
+| [`agent/tools.py`](src/fantasy_helper/agent/tools.py) | The agent's tools: the API's route functions, trimmed for a model, with strict-mode argument schemas; the trade tools are gated |
+| [`agent/resolve.py`](src/fantasy_helper/agent/resolve.py) | Team and player names the model writes → ids, or the candidates when a name is unclear |
+| [`aws.py`](src/fantasy_helper/aws.py) | Lambda entry point for the scheduled ingest |
 
 ### Analytics
 

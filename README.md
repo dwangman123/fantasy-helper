@@ -228,6 +228,7 @@ backend/
     trades.py        trade evaluation and the trade finder for one team
     fit_bounce.py    `fh-fit-bounce`: weekly bounce for the G-score weights, from last season
     api/             FastAPI app (`fh-api`)
+    agent/           the AI agent's tools (the API's analytics, trimmed for a model) and name lookup
     aws.py           Lambda entry point for the scheduled ingest
   alembic/           migrations
   data/              per-season matchup calendars
