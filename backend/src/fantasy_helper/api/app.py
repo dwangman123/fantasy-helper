@@ -82,12 +82,13 @@ def get_session(request: Request) -> Iterator[Session]:
 
 
 class Ctx:
-    """Per-request access to settings, the cache and the current snapshot."""
+    """Access to settings, the cache and the current snapshot: one request's, or one agent
+    turn's (the agent opens its own session inside a streamed response)."""
 
-    def __init__(self, request: Request, session: Annotated[Session, Depends(get_session)]):
+    def __init__(self, session: Session, settings: Settings, cache: SnapshotCache):
         self.session = session
-        self.settings: Settings = request.app.state.settings
-        self.cache: SnapshotCache = request.app.state.cache
+        self.settings = settings
+        self.cache = cache
         league = session.get(m.League, self.settings.season)
         if league is None:
             raise LookupError(f"No league stored for season {self.settings.season}; run fh-ingest first")
@@ -111,7 +112,11 @@ class Ctx:
         return self.cache.get(("outlook", self.key), lambda: season_outlook(self.context()))
 
 
-CtxDep = Annotated[Ctx, Depends()]
+def get_ctx(request: Request, session: Annotated[Session, Depends(get_session)]) -> Ctx:
+    return Ctx(session, request.app.state.settings, request.app.state.cache)
+
+
+CtxDep = Annotated[Ctx, Depends(get_ctx)]
 
 
 @router.get("/health")
