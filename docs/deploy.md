@@ -8,7 +8,9 @@ EventBridge Scheduler (hourly) -> ingest (Lambda) --> Postgres (Neon, free plan)
 browser -> Next.js (Vercel) -- /api/* --> API (Lambda function URL)
 ```
 
-Both functions run the same image (`backend/Dockerfile`) and read their settings from one JSON
+The two functions run two targets of one image (`backend/Dockerfile`): the API as a web server
+(uvicorn) behind the [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter), which
+lets a function URL stream a response, and the ingest as a plain Lambda handler. Both read their settings from one JSON
 secret, `fantasy-helper/app` (`{"FH_DATABASE_URL": "..."}`), through `FH_SECRET_ID`. Reads are
 public. A Refresh within 2 minutes of the last successful ingest returns that run, and a Postgres
 advisory lock keeps a Refresh and the scheduled ingest from overlapping.
@@ -48,7 +50,7 @@ brew install hashicorp/tap/terraform`).
    ```
 5. **First image.** In the GitHub repo's Settings > Secrets and variables > Actions > Variables, add
    `AWS_DEPLOY_ROLE_ARN` (the bootstrap's `deploy_role_arn` output) and `AWS_REGION`
-   (`us-east-1`). Then run Actions > Deploy on `main`. It pushes the image and notes that the
+   (`us-east-1`). Then run Actions > Deploy on `main`. It pushes both images and notes that the
    functions don't exist yet.
 6. **Main stack:** both functions, the function URL, the schedule, logs and the budget.
    ```bash
@@ -76,8 +78,9 @@ brew install hashicorp/tap/terraform`).
 
 - **Deploys:** once CI passes for a push to `main`, Actions > Deploy runs on its own: the backend
   first, then the frontend, so the site never calls an API older than itself. The backend step
-  migrates the database (`alembic upgrade head`), moves both functions to the new image and checks
-  `/api/health`. Only then does the frontend build with Vercel's production settings and go live;
+  migrates the database (`alembic upgrade head`), moves each function to its new image and checks
+  `/api/health` and `/api/health/stream`; if that check fails, both functions go back to the
+  images they ran before. Only then does the frontend build with Vercel's production settings and go live;
   if the backend fails, the old frontend stays up. If CI runs finish out of order, only `main`'s
   newest commit deploys. To redeploy without a push, run Actions > Deploy on `main` by hand. The
   deploy role only trusts `main`, so other branches can't deploy. Every push to `main` deploys
@@ -89,5 +92,11 @@ brew install hashicorp/tap/terraform`).
   `FH_DATABASE_URL=sqlite:///prod.db uv run alembic upgrade head && FH_DATABASE_URL=sqlite:///prod.db uv run fh-copy-db '<neon url>'`.
 - **Teardown:** `terraform destroy` in `infra/terraform`, then in `bootstrap`. The state bucket
   must be emptied first (it keeps old versions), and the secret stays recoverable for 7 days.
+- **Streaming:** the API can send a response as it's written, which the chat needs. Two settings
+  must agree, and `api_streaming` in `infra/terraform` sets both: the function URL's invoke mode
+  and the Lambda Web Adapter's. `terraform apply` changes them seconds apart, and requests in
+  between may fail. The deploy's smoke test reads `/api/health/stream` and, when the URL streams,
+  fails unless its 4 events arrive spread over more than a second. To go back, apply with
+  `-var api_streaming=false`.
 - **Changing the secret:** each function reads it once per cold start, so a new value applies
   after the next deploy, or once Lambda recycles its environments.

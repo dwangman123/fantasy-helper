@@ -32,6 +32,14 @@ def client():
         yield c
 
 
+def test_health_stream_sends_spaced_server_sent_events(client):
+    client.app.state.stream_interval = 0
+    with client.stream("GET", "/api/health/stream") as response:
+        assert response.headers["content-type"].startswith("text/event-stream")
+        lines = [line for line in response.iter_lines() if line]
+    assert lines == [f'data: {{"n": {n}, "of": 4}}' for n in range(1, 5)]
+
+
 def test_league_describes_the_current_week(client):
     body = client.get("/api/league").json()
     assert body["my_team_id"] == MY_TEAM and body["week"]["matchup_period"] == 3

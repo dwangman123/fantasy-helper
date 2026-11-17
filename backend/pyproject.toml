@@ -30,7 +30,6 @@ fh-fit-bounce = "fantasy_helper.fit_bounce:main"
 [project.optional-dependencies]
 aws = [
     "boto3>=1.43.123",
-    "mangum>=0.22.0",
 ]
 
 [build-system]

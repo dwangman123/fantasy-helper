@@ -80,7 +80,8 @@ jobs:
           done
 
   image:
-    # Builds the Lambda image and answers one request through the base image's runtime emulator.
+    # Builds both Lambda images. The API image is a web server (the Lambda Web Adapter only runs
+    # on Lambda), so it's checked over plain HTTP; the ingest image is only built, which imports it.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -88,25 +89,31 @@ jobs:
       - uses: docker/build-push-action@v7
         with:
           context: backend
+          target: api
           platforms: linux/amd64
           provenance: false
           load: true
           tags: fantasy-helper:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      - name: Smoke test /api/health
+      - uses: docker/build-push-action@v7
+        with:
+          context: backend
+          target: ingest
+          platforms: linux/amd64
+          provenance: false
+          cache-from: type=gha
+      - name: Smoke test /api/health and /api/health/stream
         run: |
-          docker run -d --name api -p 9000:8080 fantasy-helper:ci
-          event='{"version": "2.0", "routeKey": "$default", "rawPath": "/api/health", "rawQueryString": "",
-            "headers": {"host": "localhost"}, "isBase64Encoded": false,
-            "requestContext": {"http": {"method": "GET", "path": "/api/health", "protocol": "HTTP/1.1",
-              "sourceIp": "127.0.0.1", "userAgent": "ci"}, "requestId": "ci", "routeKey": "$default",
-              "stage": "$default", "domainName": "localhost", "accountId": "anonymous", "apiId": "ci",
-              "time": "01/Jan/2026:00:00:00 +0000", "timeEpoch": 0}}'
-          for i in $(seq 1 10); do
-            response=$(curl -s -XPOST localhost:9000/2015-03-31/functions/function/invocations -d "$event") && break
-            sleep 1
-          done
-          echo "$response"
-          docker logs api
-          echo "$response" | grep -q '"statusCode": 200'
+          docker run -d --name api -p 8080:8080 fantasy-helper:ci
+          trap 'docker logs api' EXIT
+          # Until the server is listening, Docker's port forward resets the connection, which
+          # curl only retries with --retry-all-errors.
+          curl --fail --silent --show-error --retry 20 --retry-delay 1 --retry-all-errors localhost:8080/api/health
+          # Outside Lambda nothing buffers the response: the 4 events are 0.5 s apart, so the
+          # first must arrive well before the last.
+          curl --fail --silent --show-error --no-buffer localhost:8080/api/health/stream \
+            | while read -r line; do if [ -n "$line" ]; then echo "$(date +%s.%N) $line"; fi; done > events.txt
+          cat events.txt
+          [ "$(wc -l < events.txt)" -eq 4 ]
+          awk 'NR == 1 { first = $1 } END { exit !($1 - first > 1) }' events.txt

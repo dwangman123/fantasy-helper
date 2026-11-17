@@ -62,16 +62,34 @@ jobs:
       - id: ecr
         uses: aws-actions/amazon-ecr-login@v2
       - uses: docker/setup-buildx-action@v4
-      - id: build
+      # One Dockerfile, two targets that share every layer but the last: the API as a web server
+      # behind the Lambda Web Adapter, and the ingest as a plain handler. The moving `api` and
+      # `ingest` tags are what Terraform's first apply looks up.
+      - id: build-api
         uses: docker/build-push-action@v7
         with:
           context: backend
+          target: api
           platforms: linux/amd64
           provenance: false # Lambda rejects image indexes with attestations
           push: true
-          tags: ${{ steps.ecr.outputs.registry }}/${{ env.PROJECT }}:${{ needs.newest.outputs.sha }}
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/${{ env.PROJECT }}:${{ needs.newest.outputs.sha }}-api
+            ${{ steps.ecr.outputs.registry }}/${{ env.PROJECT }}:api
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - id: build-ingest
+        uses: docker/build-push-action@v7
+        with:
+          context: backend
+          target: ingest
+          platforms: linux/amd64
+          provenance: false
+          push: true
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/${{ env.PROJECT }}:${{ needs.newest.outputs.sha }}-ingest
+            ${{ steps.ecr.outputs.registry }}/${{ env.PROJECT }}:ingest
+          cache-from: type=gha
 
       - uses: astral-sh/setup-uv@v10.3.0 # publishes no major tag
         with:
@@ -84,26 +102,59 @@ jobs:
           FH_SECRET_ID: ${{ env.PROJECT }}/app # the app's own settings source reads the database URL
         run: uv sync --frozen --extra aws && uv run alembic upgrade head
 
-      - name: Move the functions to the new image
+      - name: Move the functions to the new images
+        id: move
         env:
-          IMAGE: ${{ steps.ecr.outputs.registry }}/${{ env.PROJECT }}@${{ steps.build.outputs.digest }}
+          REPO: ${{ steps.ecr.outputs.registry }}/${{ env.PROJECT }}
+          API_DIGEST: ${{ steps.build-api.outputs.digest }}
+          INGEST_DIGEST: ${{ steps.build-ingest.outputs.digest }}
         run: |
-          for fn in "$PROJECT-api" "$PROJECT-ingest"; do
-            if ! aws lambda get-function --function-name "$fn" > /dev/null 2>&1; then
-              echo "::notice::$fn doesn't exist yet; the image is pushed, so run terraform apply in infra/terraform"
-              continue
+          move() { # function name, image digest, output name for the image it ran before
+            if ! previous=$(aws lambda get-function --function-name "$1" --query Code.ImageUri --output text 2> /dev/null); then
+              echo "::notice::$1 doesn't exist yet; the image is pushed, so run terraform apply in infra/terraform"
+              return
             fi
-            aws lambda update-function-code --function-name "$fn" --image-uri "$IMAGE" > /dev/null
-            aws lambda wait function-updated --function-name "$fn"
-            echo "$fn -> $IMAGE"
-          done
+            echo "$3=$previous" >> "$GITHUB_OUTPUT"
+            aws lambda update-function-code --function-name "$1" --image-uri "$REPO@$2" > /dev/null
+            aws lambda wait function-updated --function-name "$1"
+            echo "$1 -> $REPO@$2 (was $previous)"
+          }
+          move "$PROJECT-api" "$API_DIGEST" previous_api
+          move "$PROJECT-ingest" "$INGEST_DIGEST" previous_ingest
 
       - name: Smoke test
+        id: smoke
         run: |
           if ! url=$(aws lambda get-function-url-config --function-name "$PROJECT-api" --query FunctionUrl --output text 2> /dev/null); then
             echo "No API function yet"; exit 0
           fi
           curl --fail --silent --show-error --retry 3 --retry-delay 5 "${url%/}/api/health"
+          # Every event must arrive, 0.5 s apart when the function URL streams (api_streaming in
+          # infra/terraform): then the first must come well before the last.
+          curl --fail --silent --show-error --no-buffer "${url%/}/api/health/stream" \
+            | while read -r line; do if [ -n "$line" ]; then echo "$(date +%s.%N) $line"; fi; done > events.txt
+          cat events.txt
+          [ "$(grep -c ' data: ' events.txt)" -eq 4 ]
+          mode=$(aws lambda get-function-url-config --function-name "$PROJECT-api" --query InvokeMode --output text)
+          echo "Function URL invoke mode: $mode"
+          if [ "$mode" = "RESPONSE_STREAM" ]; then
+            awk 'NR == 1 { first = $1 } END { exit !($1 - first > 1) }' events.txt
+          fi
+
+      - name: Roll back if the smoke test failed
+        if: failure() && steps.smoke.conclusion == 'failure'
+        env:
+          PREVIOUS_API: ${{ steps.move.outputs.previous_api }}
+          PREVIOUS_INGEST: ${{ steps.move.outputs.previous_ingest }}
+        run: |
+          back() {
+            [ -n "$2" ] || return 0
+            aws lambda update-function-code --function-name "$1" --image-uri "$2" > /dev/null
+            aws lambda wait function-updated --function-name "$1"
+            echo "::warning::$1 rolled back to $2"
+          }
+          back "$PROJECT-api" "$PREVIOUS_API"
+          back "$PROJECT-ingest" "$PREVIOUS_INGEST"
 
   frontend:
     # Only once the backend is live. Builds with the production settings and env vars from Vercel

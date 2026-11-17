@@ -1,7 +1,8 @@
-# The deployed backend: one container image run as two Lambda functions. The API serves the
-# REST endpoints through a public function URL (the Next.js frontend proxies /api/* to it), and
-# the ingest runs on an EventBridge Scheduler cron. The database is Postgres outside AWS (Neon);
-# its URL lives in the app secret from ../bootstrap, which both functions read at startup.
+# The deployed backend: two Lambda functions on two targets of one container image. The API is a
+# web server behind the Lambda Web Adapter, reached through a public function URL (the Next.js
+# frontend proxies /api/* to it), and the ingest runs on an EventBridge Scheduler cron. The
+# database is Postgres outside AWS (Neon); its URL lives in the app secret from ../bootstrap,
+# which both functions read at startup.
 
 terraform {
   required_version = ">= 1.11"
@@ -32,11 +33,17 @@ data "aws_ecr_repository" "app" {
   name = var.project
 }
 
-# Only the first apply uses this: afterwards the deploy workflow moves the functions to each
-# new image, and Terraform leaves image_uri alone.
-data "aws_ecr_image" "latest" {
+# The image has two targets (backend/Dockerfile), and the deploy workflow keeps the tags `api`
+# and `ingest` on the newest of each. Only the first apply uses these: afterwards the deploy
+# workflow moves the functions to each new image, and Terraform leaves image_uri alone.
+data "aws_ecr_image" "api" {
   repository_name = data.aws_ecr_repository.app.name
-  most_recent     = true
+  image_tag       = "api"
+}
+
+data "aws_ecr_image" "ingest" {
+  repository_name = data.aws_ecr_repository.app.name
+  image_tag       = "ingest"
 }
 
 data "aws_secretsmanager_secret" "app" {
@@ -44,10 +51,16 @@ data "aws_secretsmanager_secret" "app" {
 }
 
 locals {
-  image_uri = "${data.aws_ecr_repository.app.repository_url}@${data.aws_ecr_image.latest.image_digest}"
+  api_image_uri    = "${data.aws_ecr_repository.app.repository_url}@${data.aws_ecr_image.api.image_digest}"
+  ingest_image_uri = "${data.aws_ecr_repository.app.repository_url}@${data.aws_ecr_image.ingest.image_digest}"
   environment = {
     FH_SECRET_ID                = data.aws_secretsmanager_secret.app.name
     FH_REFRESH_COOLDOWN_SECONDS = tostring(var.refresh_cooldown_seconds)
+  }
+  # The Lambda Web Adapter must send a response the way the function URL expects it: both
+  # streamed or both buffered. One variable sets the two, so they can't be applied apart.
+  api_environment = {
+    AWS_LWA_INVOKE_MODE = var.api_streaming ? "response_stream" : "buffered"
   }
 }
 
@@ -94,7 +107,7 @@ resource "aws_lambda_function" "api" {
   function_name = "${var.project}-api"
   role          = aws_iam_role.lambda.arn
   package_type  = "Image"
-  image_uri     = local.image_uri
+  image_uri     = local.api_image_uri
   architectures = ["x86_64"]
   memory_size   = var.memory_mb
   timeout       = 90 # a refresh runs a whole ingest
@@ -102,7 +115,7 @@ resource "aws_lambda_function" "api" {
   reserved_concurrent_executions = var.api_reserved_concurrency
 
   environment {
-    variables = local.environment
+    variables = merge(local.environment, local.api_environment)
   }
   logging_config {
     log_format = "Text"
@@ -118,6 +131,7 @@ resource "aws_lambda_function" "api" {
 resource "aws_lambda_function_url" "api" {
   function_name      = aws_lambda_function.api.function_name
   authorization_type = "NONE"
+  invoke_mode        = var.api_streaming ? "RESPONSE_STREAM" : "BUFFERED"
 }
 
 # A public function URL needs both permissions (required for new URLs since October 2025).
@@ -148,7 +162,7 @@ resource "aws_lambda_function" "ingest" {
   function_name = "${var.project}-ingest"
   role          = aws_iam_role.lambda.arn
   package_type  = "Image"
-  image_uri     = local.image_uri
+  image_uri     = local.ingest_image_uri
   architectures = ["x86_64"]
   memory_size   = var.memory_mb
   timeout       = 300

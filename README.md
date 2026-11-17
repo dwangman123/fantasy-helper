@@ -18,7 +18,7 @@ Fantasy Helper pulls the whole league from ESPN every hour, or on demand with Re
 
 ## What it does
 
-The league scores **FG%, FT%, 3PM, REB, AST, STL, BLK, TO and PTS** head to head, most categories wins, with ties allowed. Each team starts 10 players a day. The app has five pages. Anyone in the league can look at any team, so no view assumes whose it is.
+The league scores **FG%, FT%, 3PM, REB, AST, STL, BLK, TO and PTS** head to head, most categories wins, with ties allowed. Each team starts 10 players a day. The app has five pages. Anyone in the league can look at any team, so no view assumes whose it is. A chat assistant that answers questions with the same numbers is in progress: its tools are built, the chat isn't yet.
 
 ### Matchup: who wins this week, and why
 
@@ -156,15 +156,15 @@ flowchart LR
     site["ESPN NBA site API<br/>scoreboard, opponent stats"] --> ingest
     sched["EventBridge Scheduler<br/>hourly"] --> ingest
     ingest["Ingest<br/>AWS Lambda"] --> db[("Postgres<br/>Neon")]
-    db --> api["REST API<br/>AWS Lambda<br/>FastAPI + Mangum"]
+    db --> api["REST API<br/>AWS Lambda<br/>FastAPI + uvicorn"]
     api -- "/api/* rewrite" --> web["Next.js<br/>Vercel"]
     web --> user(["Browser"])
 ```
 
 - **Ingest.** It pulls one consistent snapshot of the league from ESPN and cross-checks it, then stores it and appends the week's matchup predictions. Each run is logged with its warnings. The app's Refresh button runs the same job inside the API Lambda, and a Postgres advisory lock keeps it and the hourly run from overlapping. Both Lambdas read the database URL from Secrets Manager.
 - **Analytics.** These are pure functions over ESPN-independent domain types, with no database or network access. So the same models run behind the API, the CLI tools and the tests.
-- **API.** It serves each view from one team's side and caches simulations in memory per snapshot. The frontend is a thin client: it only formats what the API returns.
-- **Deploys.** Both Lambdas run the same container image. GitHub Actions deploys after CI passes on `main`: the backend first (migrate, update both functions, health check), then the frontend. Terraform defines the AWS side. The whole thing is estimated at about $1 a month.
+- **API.** It serves each view from one team's side and caches simulations in memory per snapshot. On Lambda it runs as a web server (uvicorn) behind the [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter), so a response can stream as it's written. The frontend is a thin client: it only formats what the API returns.
+- **Deploys.** The two Lambdas run two targets of one container image. GitHub Actions deploys after CI passes on `main`: the backend first (migrate, update both functions, smoke-test them, roll back if that fails), then the frontend. Terraform defines the AWS side. The whole thing is estimated at about $1 a month.
 
 Inside the backend, data flows one way:
 
@@ -186,7 +186,7 @@ flowchart TB
 |---|---|
 | **Backend** | Python 3.12, FastAPI, SQLAlchemy + Alembic, NumPy, SciPy, [espn-api](https://github.com/cwendt94/espn-api), uv, Ruff, pytest |
 | **Frontend** | Next.js 16 (App Router), React 19, TanStack Query, plain CSS with light and dark themes |
-| **Infrastructure** | AWS Lambda (container image on ECR), EventBridge Scheduler, Secrets Manager, Neon Postgres, Vercel, Terraform, GitHub Actions |
+| **Infrastructure** | AWS Lambda (container images on ECR, Lambda Web Adapter), EventBridge Scheduler, Secrets Manager, Neon Postgres, Vercel, Terraform, GitHub Actions |
 
 ## Data sources and caveats
 
@@ -207,6 +207,7 @@ backend/              Python package: ESPN ingest, database, analytics, REST API
     db/               SQLAlchemy models and queries (SQLite locally, Postgres deployed)
     analytics/        pure model code: z/G-scores, rates, simulation, waivers, trades, power
     api/              FastAPI app
+    agent/            the chat assistant's tools and name lookup (in progress)
   data/               matchup calendar and the fitted weekly bounce
 frontend/             Next.js app: Matchup, Team, League, Waivers and Trades pages
 infra/terraform/      AWS infrastructure
