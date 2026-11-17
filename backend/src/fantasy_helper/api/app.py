@@ -7,7 +7,9 @@ unless `team_id` says otherwise.
 """
 
 import argparse
+import json
 import threading
+import time
 from collections import OrderedDict
 from collections.abc import Callable, Hashable, Iterator
 from datetime import UTC, datetime, timedelta
@@ -15,7 +17,7 @@ from typing import Annotated, Any
 
 import uvicorn
 from fastapi import APIRouter, Depends, FastAPI, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -115,6 +117,27 @@ CtxDep = Annotated[Ctx, Depends()]
 @router.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+STREAM_EVENTS = 4
+STREAM_INTERVAL_SECONDS = 0.5
+
+
+@router.get("/health/stream")
+def health_stream(request: Request) -> StreamingResponse:
+    """A few server-sent events, spaced out: a check that a response reaches the client as it's
+    written rather than in one piece at the end (the deploy's smoke test times them)."""
+    interval = request.app.state.stream_interval
+
+    def events() -> Iterator[str]:
+        for i in range(STREAM_EVENTS):
+            if i:
+                time.sleep(interval)
+            yield f"data: {json.dumps({'n': i + 1, 'of': STREAM_EVENTS})}\n\n"
+
+    # no-transform and X-Accel-Buffering ask proxies on the way not to compress or hold it back.
+    headers = {"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"}
+    return StreamingResponse(events(), media_type="text/event-stream", headers=headers)
 
 
 def _ingest_out(run: m.IngestRun) -> s.IngestOut:
@@ -876,6 +899,7 @@ def create_app(session_factory: sessionmaker | None = None, settings: Settings |
     app.state.settings = settings or get_settings()
     app.state.cache = SnapshotCache()
     app.state.refresh_lock = threading.Lock()
+    app.state.stream_interval = STREAM_INTERVAL_SECONDS
     app.include_router(router)
 
     @app.exception_handler(LookupError)

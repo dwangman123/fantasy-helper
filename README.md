@@ -62,7 +62,7 @@ partner's value balance: G-scores above replacement level, received minus sent, 
 marked (see PROJECT_PLAN.md).
 
 **Week 6 (AWS deploy): built, not yet applied.** Terraform in `infra/terraform/` runs the backend
-as one container image on two AWS Lambda functions: the REST API behind a public function URL,
+as two AWS Lambda functions on two targets of one container image: the REST API behind a public function URL,
 and the ingest on an hourly EventBridge Scheduler cron. The database is Postgres on Neon's free
 plan, and its URL lives in Secrets Manager. The Next.js frontend is on Vercel, proxying `/api/*`
 to the function URL. GitHub Actions runs the checks on every push and deploys on demand. Expected
@@ -113,7 +113,9 @@ EventBridge Scheduler (hourly) -> ingest (Lambda) --> Postgres (Neon, free plan)
 browser -> Next.js (Vercel) -- /api/* --> API (Lambda function URL)
 ```
 
-Both functions run the same image (`backend/Dockerfile`) and read their settings from one JSON
+The two functions run two targets of one image (`backend/Dockerfile`): the API as a web server
+(uvicorn) behind the [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter), which
+lets a function URL stream a response, and the ingest as a plain Lambda handler. Both read their settings from one JSON
 secret, `fantasy-helper/app` (`{"FH_DATABASE_URL": "..."}`), through `FH_SECRET_ID`. Reads are
 public. A Refresh within 2 minutes of the last successful ingest returns that run, and a Postgres
 advisory lock keeps a Refresh and the scheduled ingest from overlapping.
@@ -153,7 +155,7 @@ brew install hashicorp/tap/terraform`).
    ```
 5. **First image.** In the GitHub repo's Settings > Secrets and variables > Actions > Variables, add
    `AWS_DEPLOY_ROLE_ARN` (the bootstrap's `deploy_role_arn` output) and `AWS_REGION`
-   (`us-east-1`). Then run Actions > Deploy on `main`. It pushes the image and notes that the
+   (`us-east-1`). Then run Actions > Deploy on `main`. It pushes both images and notes that the
    functions don't exist yet.
 6. **Main stack:** both functions, the function URL, the schedule, logs and the budget.
    ```bash
@@ -182,8 +184,9 @@ brew install hashicorp/tap/terraform`).
 
 - **Deploys:** once CI passes for a push to `main`, Actions > Deploy runs on its own: the backend
   first, then the frontend, so the site never calls an API older than itself. The backend step
-  migrates the database (`alembic upgrade head`), moves both functions to the new image and checks
-  `/api/health`. Only then does the frontend build with Vercel's production settings and go live;
+  migrates the database (`alembic upgrade head`), moves each function to its new image and checks
+  `/api/health` and `/api/health/stream`; if that check fails, both functions go back to the
+  images they ran before. Only then does the frontend build with Vercel's production settings and go live;
   if the backend fails, the old frontend stays up. If CI runs finish out of order, only `main`'s
   newest commit deploys. To redeploy without a push, run Actions > Deploy on `main` by hand. The
   deploy role only trusts `main`, so other branches can't deploy. Every push to `main` deploys
@@ -219,11 +222,11 @@ backend/
     trades.py        trade evaluation and the trade finder for one team
     fit_bounce.py    `fh-fit-bounce`: weekly bounce for the G-score weights, from last season
     api/             FastAPI app (`fh-api`)
-    aws.py           Lambda entry points: the API (via Mangum) and the scheduled ingest
+    aws.py           Lambda entry point for the scheduled ingest
   alembic/           migrations
   data/              per-season matchup calendars
   tests/
-  Dockerfile         the Lambda image (API by default; the ingest overrides the command)
+  Dockerfile         the Lambda images: targets `api` (uvicorn + Lambda Web Adapter) and `ingest`
 frontend/            Next.js + TanStack Query: Matchup, Team, League, Waivers and Trades pages
 infra/terraform/     bootstrap/ (state, image repo, secret, deploy role) and the main stack
 .github/workflows/   ci.yml (checks on every push), deploy.yml (backend, then frontend, after CI passes on main)

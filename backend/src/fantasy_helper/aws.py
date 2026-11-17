@@ -1,12 +1,9 @@
-"""AWS Lambda entry points for the deployed image (see infra/terraform): the REST API behind a
-function URL, and the ingest that EventBridge Scheduler runs. Both read their secrets through
-FH_SECRET_ID (see config.py)."""
+"""The AWS Lambda entry point for the scheduled ingest, which EventBridge Scheduler runs (see
+infra/terraform). The REST API needs none: its image runs the app with uvicorn behind the Lambda
+Web Adapter (see the Dockerfile). Both read their secrets through FH_SECRET_ID (see config.py)."""
 
 import logging
 
-from mangum import Mangum
-
-from fantasy_helper.api.app import create_app
 from fantasy_helper.ingest.run import IngestBusy
 from fantasy_helper.ingest.run import run as run_ingest
 
@@ -14,8 +11,6 @@ from fantasy_helper.ingest.run import run as run_ingest
 # ingest's progress lines never reach CloudWatch.
 logging.getLogger().setLevel(logging.INFO)
 log = logging.getLogger("fantasy_helper.aws")
-
-api = Mangum(create_app(), lifespan="off")
 
 
 def ingest(event: dict, context: object) -> dict:

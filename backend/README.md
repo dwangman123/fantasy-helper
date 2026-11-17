@@ -41,7 +41,7 @@ espn/client.py --> espn/parse.py --> domain.py (LeagueSnapshot)
 6. **Services.** [`predict.py`](src/fantasy_helper/predict.py), [`waivers.py`](src/fantasy_helper/waivers.py) and [`trades.py`](src/fantasy_helper/trades.py) combine a context with the analytics for one team. They return reports that carry their assumptions, so the UI can state them.
 7. **API** ([`api/app.py`](src/fantasy_helper/api/app.py)). Serves the services' results, cached in memory per snapshot.
 
-When deployed, [`aws.py`](src/fantasy_helper/aws.py) holds both Lambda entry points: `api` wraps the FastAPI app with Mangum, and `ingest` is the scheduled job. Both are in the same image ([`Dockerfile`](Dockerfile)).
+When deployed, the [`Dockerfile`](Dockerfile) builds two images from one base. The `api` target runs the FastAPI app with uvicorn behind the [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter), so a response can be streamed as it's written. The `ingest` target runs the scheduled job, a plain Lambda handler in [`aws.py`](src/fantasy_helper/aws.py).
 
 ## Module guide
 
@@ -96,6 +96,7 @@ Matchup, lineup, waiver and trade views are from one team's side (`me` / `opp`, 
 | Method | Path | Query params | Returns | Used by |
 |---|---|---|---|---|
 | GET | `/api/health` | | `{"status": "ok"}` | Deploy smoke tests |
+| GET | `/api/health/stream` | | 4 server-sent events, 0.5 s apart: a check that responses stream | Deploy smoke tests |
 | GET | `/api/league` | | Season, weeks, categories, teams, last ingest | Every page (top bar) |
 | GET | `/api/matchups` | `period` | Every matchup's odds for a week | Matchup |
 | GET | `/api/matchup` | `team_id`, `period` | One matchup head to head: category odds, odds history | Matchup |
