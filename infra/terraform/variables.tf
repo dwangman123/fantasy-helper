@@ -26,6 +26,17 @@ variable "api_reserved_concurrency" {
   default     = null
 }
 
+variable "api_streaming" {
+  description = <<-EOT
+    Send API responses to the client as they're written (the function URL's RESPONSE_STREAM mode
+    and the Lambda Web Adapter's response_stream), which the chat needs. False buffers each
+    response whole, as before. Changing it updates the function and its URL seconds apart, and
+    requests in between may fail.
+  EOT
+  type        = bool
+  default     = true
+}
+
 variable "refresh_cooldown_seconds" {
   description = "A Refresh this soon after a successful ingest returns that run instead of fetching again."
   type        = number

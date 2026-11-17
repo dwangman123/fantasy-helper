@@ -57,6 +57,11 @@ locals {
     FH_SECRET_ID                = data.aws_secretsmanager_secret.app.name
     FH_REFRESH_COOLDOWN_SECONDS = tostring(var.refresh_cooldown_seconds)
   }
+  # The Lambda Web Adapter must send a response the way the function URL expects it: both
+  # streamed or both buffered. One variable sets the two, so they can't be applied apart.
+  api_environment = {
+    AWS_LWA_INVOKE_MODE = var.api_streaming ? "response_stream" : "buffered"
+  }
 }
 
 # --- Execution role ------------------------------------------------------------------------
@@ -110,7 +115,7 @@ resource "aws_lambda_function" "api" {
   reserved_concurrent_executions = var.api_reserved_concurrency
 
   environment {
-    variables = local.environment
+    variables = merge(local.environment, local.api_environment)
   }
   logging_config {
     log_format = "Text"
@@ -126,6 +131,7 @@ resource "aws_lambda_function" "api" {
 resource "aws_lambda_function_url" "api" {
   function_name      = aws_lambda_function.api.function_name
   authorization_type = "NONE"
+  invoke_mode        = var.api_streaming ? "RESPONSE_STREAM" : "BUFFERED"
 }
 
 # A public function URL needs both permissions (required for new URLs since October 2025).

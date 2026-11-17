@@ -198,6 +198,12 @@ brew install hashicorp/tap/terraform`).
   `FH_DATABASE_URL=sqlite:///prod.db uv run alembic upgrade head && FH_DATABASE_URL=sqlite:///prod.db uv run fh-copy-db '<neon url>'`.
 - **Teardown:** `terraform destroy` in `infra/terraform`, then in `bootstrap`. The state bucket
   must be emptied first (it keeps old versions), and the secret stays recoverable for 7 days.
+- **Streaming:** the API can send a response as it's written, which the chat needs. Two settings
+  must agree, and `api_streaming` in `infra/terraform` sets both: the function URL's invoke mode
+  and the Lambda Web Adapter's. `terraform apply` changes them seconds apart, and requests in
+  between may fail. The deploy's smoke test reads `/api/health/stream` and, when the URL streams,
+  fails unless its 4 events arrive spread over more than a second. To go back, apply with
+  `-var api_streaming=false`.
 - **Changing the secret:** each function reads it once per cold start, so a new value applies
   after the next deploy, or once Lambda recycles its environments.
 
