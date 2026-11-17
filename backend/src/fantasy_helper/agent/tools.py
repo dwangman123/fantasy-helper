@@ -559,6 +559,8 @@ def run_tool(c: Ctx, name: str, arguments: dict[str, Any], allowed: list[Tool] |
     args = {k: arguments.get(k) for k in tool.parameters["properties"]}
     try:
         return tool.run(c, Names(c), **args)
+    except (KeyError, IndexError):
+        raise  # a bug, not a bad argument: the caller logs it rather than the model retrying
     except (ValueError, LookupError) as exc:
         return {"error": str(exc)}
 

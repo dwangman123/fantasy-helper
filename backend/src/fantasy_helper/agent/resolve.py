@@ -20,6 +20,21 @@ SUGGEST_CUTOFF = 0.6
 MAX_SUGGESTIONS = 5
 
 
+def split_label(text: str) -> tuple[str, str | None]:
+    """A label the tools write, "name (where)", split into its name and the bracket's contents:
+    "Team 4 (you)" -> ("Team 4", "you"); "Jalen Williams (Dennis (you))" -> ("Jalen Williams", "Dennis (you)")."""
+    text = text.strip()
+    if not text.endswith(")"):
+        return text, None
+    depth = 0
+    for i in range(len(text) - 1, -1, -1):
+        depth += {")": 1, "(": -1}.get(text[i], 0)
+        if depth == 0:
+            base = text[:i].strip()
+            return (base, text[i + 1 : -1].strip()) if base else (text, None)
+    return text, None
+
+
 def normalize(name: str) -> str:
     """Lowercase ASCII words: "Nikola Jokić" -> "nikola jokic", "De'Aaron Fox" -> "deaaron fox",
     "P.J. Washington Jr." -> "pj washington"."""
@@ -40,15 +55,19 @@ class TeamName:
 
 
 def resolve_team(query: str | None, teams: list[TeamName], my_team_id: int) -> int:
-    """`query` None or "me" is my team."""
+    """`query` None or "me" is my team. A label the tools wrote, "Dennis (you)" or
+    "Dennis (Bicoastal Ballaz)", resolves to its team."""
     if query is None or normalize(query) in ME | {""}:
         return my_team_id
-    q = normalize(query)
+    base, note = split_label(query)
+    if note is not None and normalize(note) in ME:
+        return my_team_id
+    q = normalize(base)
     if q.isdigit() and int(q) in {t.team_id for t in teams}:
         return int(q)
     names = {t.team_id: [n for n in (normalize(t.owner), normalize(t.name), normalize(t.abbrev)) if n] for t in teams}
     # "Dennis's team" -> "dennis"; tried after the query as written, so "Team Five" still matches.
-    bare = normalize(re.sub(r"['’]s\b", "", query)).removesuffix(" team").strip()
+    bare = normalize(re.sub(r"['’]s\b", "", base)).removesuffix(" team").strip()
     for text in dict.fromkeys(t for t in (q, bare) if t):  # never empty: every name starts with ''
         for match in (
             lambda n, t=text: n == t,
@@ -76,7 +95,21 @@ class PlayerName:
 
 def resolve_player(query: str, players: list[PlayerName]) -> int:
     """Exact names first, then a unique last or first name, initials, the start or a run of a name,
-    then a unique close spelling."""
+    then a unique close spelling. A suggestion echoed back, "Jalen Williams (free agent)", looks
+    among the players there first, which also tells apart two players with one name."""
+    base, where = split_label(query)
+    if where is not None:
+        here = [p for p in players if normalize(p.where) == normalize(where)]
+        if here:
+            try:
+                return _resolve_player(base, here)
+            except ValueError:
+                pass
+        query = base
+    return _resolve_player(query, players)
+
+
+def _resolve_player(query: str, players: list[PlayerName]) -> int:
     q = normalize(query)
     if not q:
         raise ValueError("A player's name is needed")

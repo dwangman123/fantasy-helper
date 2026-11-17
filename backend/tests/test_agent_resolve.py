@@ -2,7 +2,7 @@
 
 import pytest
 
-from fantasy_helper.agent.resolve import PlayerName, TeamName, normalize, resolve_player, resolve_team
+from fantasy_helper.agent.resolve import PlayerName, TeamName, normalize, resolve_player, resolve_team, split_label
 
 TEAMS = [
     TeamName(1, "Dennis", "Bicoastal Ballaz", "BCB"),
@@ -27,6 +27,8 @@ PLAYERS = [
     PlayerName(13, "Keon Durren", "free agent"),
     PlayerName(14, "Anthony Davis", "Dennis"),
     PlayerName(15, "Bradley Beal", "free agent"),
+    PlayerName(16, "Marcus Morris", "Dennis (you)"),  # two players with one name
+    PlayerName(17, "Marcus Morris", "free agent"),
 ]
 
 
@@ -45,7 +47,20 @@ def test_normalize_drops_accents_punctuation_and_suffixes(name, normal):
     assert normalize(name) == normal
 
 
-@pytest.mark.parametrize("query", [None, "", "me", "My team", "mine"])
+@pytest.mark.parametrize(
+    ("label", "split"),
+    [
+        ("Team 4 (you)", ("Team 4", "you")),
+        ("Jalen Williams (Dennis (you))", ("Jalen Williams", "Dennis (you)")),
+        ("Jalen Williams", ("Jalen Williams", None)),
+        ("(you)", ("(you)", None)),
+    ],
+)
+def test_split_label(label, split):
+    assert split_label(label) == split
+
+
+@pytest.mark.parametrize("query", [None, "", "me", "My team", "mine", "Dennis (you)", "Anyone (you)"])
 def test_no_team_or_me_is_my_team(query):
     assert resolve_team(query, TEAMS, my_team_id=1) == 1
 
@@ -63,6 +78,8 @@ def test_no_team_or_me_is_my_team(query):
         ("Bicoastal", 1),  # a word of the team name
         ("Prya", 4),  # a typo
         ("Team Five", 5),
+        ("Jordan K (Splash Bros)", 2),  # as an error message lists it
+        ("Priya (Priya's Picks)", 4),
     ],
 )
 def test_a_team_by_owner_name_abbreviation_or_id(query, team_id):
@@ -108,6 +125,26 @@ def test_a_shared_name_asks_which_and_says_where_each_plays(query, names):
     with pytest.raises(ValueError, match=f"could be {names}") as err:
         resolve_player(query, PLAYERS)
     assert "(free agent)" in str(err.value)
+
+
+@pytest.mark.parametrize(
+    ("query", "player_id"),
+    [
+        ("Jalen Williams (free agent)", 4),
+        ("Marcus Morris (Dennis (you))", 16),
+        ("Marcus Morris (free agent)", 17),
+        ("Jalen Brunson (somewhere else)", 5),  # a wrong team still finds the name
+    ],
+)
+def test_a_suggestion_echoed_back_picks_that_player(query, player_id):
+    assert resolve_player(query, PLAYERS) == player_id
+
+
+def test_every_suggestion_resolves_to_its_player():
+    with pytest.raises(ValueError) as err:
+        resolve_player("Marcus Morris", PLAYERS)
+    suggested = str(err.value).split("could be ")[1].split("; which")[0].split(", ")
+    assert [resolve_player(s, PLAYERS) for s in suggested] == [16, 17]
 
 
 def test_williams_is_not_williamson():

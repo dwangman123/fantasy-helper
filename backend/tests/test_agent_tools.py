@@ -118,6 +118,19 @@ def test_bad_names_and_arguments_come_back_as_errors(ctx):
     assert "isn't played yet" in call(ctx, "get_matchup", week=9)["error"]
 
 
+def test_every_team_label_a_tool_writes_resolves_to_that_team(ctx):
+    rows = call(ctx, "get_power_rankings")["rows"]
+    assert any(r["team"].endswith(" (you)") for r in rows)
+    for row in rows:
+        assert call(ctx, "get_team", team=row["team"], window=None)["team"] == row["team"]
+
+
+def test_a_player_label_with_its_team_resolves(ctx):
+    pid = roster(ctx, MY_TEAM)[0]
+    got = call(ctx, "player_lookup", names=[f"Player {pid} (Team {MY_TEAM} (you))"])["players"][0]
+    assert got["name"] == f"Player {pid}" and got["fantasy_team"] == f"Team {MY_TEAM} (you)"
+
+
 def test_missing_optional_arguments_mean_null(ctx):
     assert call(ctx, "get_team")["team"] == f"Team {MY_TEAM} (you)"
 
