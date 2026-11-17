@@ -2,15 +2,11 @@
 
 The frontend is a Next.js App Router app (React 19, TanStack Query, plain CSS). It's a thin view over the backend's REST API: all the analytics run in the backend, and the frontend only formats the results.
 
-Install, dev server, build and the Vercel deploy are in the [root README](../README.md). The API it calls is documented in the [backend README](../backend/README.md#rest-api).
-
-## Password
-
-[`proxy.ts`](proxy.ts) puts the Trades page, and the two routes only it calls (`/api/trades`, `/api/trade`), behind one shared password (HTTP Basic auth; any user name). The rest of the site stays open. Set `SITE_PASSWORD` to turn it on; leave it unset locally and Trades is open too. After the browser asks once, a cookie (`fh_trades`, a hash of the password) lets the page's own API calls through. The nav links to Trades as a full page load so the browser can show its password prompt. It doesn't cover the backend's own URL: anyone who knows the Lambda function URL can still call the API directly.
+Install, dev server and build are in [docs/development.md](../docs/development.md), and the Vercel deploy is in [docs/deploy.md](../docs/deploy.md). The API it calls is documented in the [backend README](../backend/README.md#rest-api).
 
 ## How it talks to the backend
 
-- **Proxy.** The browser only calls `/api/*` on its own origin. [`next.config.ts`](next.config.ts) rewrites those requests to `API_URL` (default `http://127.0.0.1:8000`). On Vercel, `API_URL` is the Terraform `api_url` output (the Lambda function URL), set before the first build (see the root README's *First deploy* steps).
+- **Proxy.** The browser only calls `/api/*` on its own origin. [`next.config.ts`](next.config.ts) rewrites those requests to `API_URL` (default `http://127.0.0.1:8000`). On Vercel, `API_URL` is the Terraform `api_url` output (the Lambda function URL), set before the first build (see *First deploy* in [docs/deploy.md](../docs/deploy.md)).
 - **[`lib/api.ts`](lib/api.ts)** is the only module that fetches. It has three parts:
   - The response types, which mirror [`backend/src/fantasy_helper/api/schemas.py`](../backend/src/fantasy_helper/api/schemas.py). Change both together: nothing checks that they agree.
   - A typed `get()` that builds the query string (arrays become repeated params) and throws `ApiError` with the backend's `detail` on any non-2xx response.
