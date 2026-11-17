@@ -12,6 +12,7 @@ dependencies = [
     "espn-api>=1.0.1",
     "fastapi>=0.162.0",
     "numpy>=2.5.4",
+    "openai>=2.54,<3",  # 3.x needs idna>=3.18; espn-api pins idna<3.16
     "psycopg[binary]>=3.3.6",
     "pydantic-settings>=2.16.0",
     "scipy>=1.18.1",
@@ -26,6 +27,7 @@ fh-waivers = "fantasy_helper.waivers:main"
 fh-api = "fantasy_helper.api.app:main"
 fh-copy-db = "fantasy_helper.db.copy:main"
 fh-fit-bounce = "fantasy_helper.fit_bounce:main"
+fh-agent = "fantasy_helper.agent.cli:main"
 
 [project.optional-dependencies]
 aws = [

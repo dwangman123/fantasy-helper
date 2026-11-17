@@ -66,6 +66,10 @@ When deployed, the [`Dockerfile`](Dockerfile) builds two images from one base. T
 | [`api/app.py`](src/fantasy_helper/api/app.py) | FastAPI routes; `fh-api` |
 | [`api/schemas.py`](src/fantasy_helper/api/schemas.py) | Response models, each from one team's side ("me" / "opp") |
 | [`agent/tools.py`](src/fantasy_helper/agent/tools.py) | The agent's tools: the API's route functions, trimmed for a model, with strict-mode argument schemas |
+| [`agent/llm.py`](src/fantasy_helper/agent/llm.py) | The model behind a small interface: OpenAI's Responses API, streamed, with nothing stored at OpenAI |
+| [`agent/prompt.py`](src/fantasy_helper/agent/prompt.py) | The agent's instructions and a card of the day's league facts |
+| [`agent/loop.py`](src/fantasy_helper/agent/loop.py) | One chat turn: model calls, tool calls, limits, usage and cost, as a stream of events |
+| [`agent/routes.py`](src/fantasy_helper/agent/routes.py) | `POST /api/agent`: a turn as server-sent events |
 | [`agent/resolve.py`](src/fantasy_helper/agent/resolve.py) | Team and player names the model writes → ids, or the candidates when a name is unclear |
 | [`aws.py`](src/fantasy_helper/aws.py) | Lambda entry point for the scheduled ingest |
 
@@ -110,6 +114,7 @@ Matchup, lineup, waiver and trade views are from one team's side (`me` / `opp`, 
 | GET | `/api/trades` | `team_id` | Deals found that help both teams | Trades |
 | GET | `/api/waivers` | `team_id`, `same_day` | Category board, stream and hold rankings | Waivers |
 | POST | `/api/refresh` | | The ingest run | Refresh button |
+| POST | `/api/agent` | | One chat turn as server-sent events; body `{"messages": [{"role": "user" or "assistant", "content": "..."}]}`, ending with a question. 503 until configured | Chat (coming) |
 
 `partner_id`, `give` and `get` are required on `/api/trade`. All other query params are optional.
 
@@ -125,7 +130,7 @@ To add an endpoint, add a response model to `api/schemas.py` and the route to `a
 
 ## Commands
 
-The six console scripts declared in [`pyproject.toml`](pyproject.toml); run each with `uv run`:
+The seven console scripts declared in [`pyproject.toml`](pyproject.toml); run each with `uv run`:
 
 | Command | Flags | What it does |
 |---|---|---|
@@ -134,6 +139,7 @@ The six console scripts declared in [`pyproject.toml`](pyproject.toml); run each
 | `fh-waivers` | `--team ID`, `--today`, `--sims N`, `--top N` | Print stream and hold rankings; `--today` assumes pickups can play today |
 | `fh-api` | `--host`, `--port`, `--reload` | Serve the API with uvicorn (default `127.0.0.1:8000`) |
 | `fh-copy-db` | `SOURCE_URL` | Copy every table from `SOURCE_URL` into the configured database, which must be empty and at the same migration |
+| `fh-agent` | `QUESTION`, `--results` | Ask the chat agent one question in the terminal; tool calls and usage go to stderr. Needs the agent settings below |
 | `fh-fit-bounce` | `--season`, `--cache DIR`, `--pool N`, `--min-week-games N` | Fit the weekly bounce from a past season (default: last season) and write `data/weekly_bounce_<season>.json`. Run once per season; `--cache` keeps the ~560 ESPN responses for reruns |
 
 ## Configuration
@@ -154,6 +160,12 @@ The six console scripts declared in [`pyproject.toml`](pyproject.toml); run each
 | `FH_FREE_AGENT_POOL_SIZE` | `200` | How many free agents each ingest fetches from ESPN |
 | `FH_REFRESH_COOLDOWN_SECONDS` | `0` | Set to 120 when deployed (see `.env.example`), since anyone can press Refresh |
 | `FH_ESPN_S2`, `FH_SWID` | unset | Private leagues only |
+| `FH_OPENAI_API_KEY`, `FH_AGENT_MODEL` | unset | The chat agent's OpenAI key and model. The chat is off until both and the three prices are set |
+| `FH_AGENT_INPUT_PRICE`, `FH_AGENT_CACHED_INPUT_PRICE`, `FH_AGENT_OUTPUT_PRICE` | unset | That model's prices in USD per million tokens, from OpenAI's pricing page; each turn is priced with them |
+| `FH_AGENT_REASONING_EFFORT` | unset | e.g. `low`; left out of requests when unset |
+| `FH_AGENT_MAX_OUTPUT_TOKENS` | `8000` | Per model call, reasoning included |
+| `FH_AGENT_MAX_STEPS` | `6` | Model calls per turn; the last can't call tools |
+| `FH_AGENT_DEADLINE_SECONDS` | `75` | For a whole turn; below the API function's 90 s timeout |
 | `FH_SECRET_ID` | unset | Read the settings above from this AWS secret |
 
 ## Database

@@ -207,7 +207,7 @@ backend/              Python package: ESPN ingest, database, analytics, REST API
     db/               SQLAlchemy models and queries (SQLite locally, Postgres deployed)
     analytics/        pure model code: z/G-scores, rates, simulation, waivers, trades, power
     api/              FastAPI app
-    agent/            the chat assistant's tools and name lookup (in progress)
+    agent/            the chat assistant: tools, name lookup, the model loop and POST /api/agent (in progress)
   data/               matchup calendar and the fitted weekly bounce
 frontend/             Next.js app: Matchup, Team, League, Waivers and Trades pages
 infra/terraform/      AWS infrastructure
