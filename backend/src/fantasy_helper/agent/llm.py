@@ -78,7 +78,8 @@ class ChatModel(Protocol):
         tool_choice: str,
         timeout: float,
     ) -> Iterator[TextDelta | Step]:
-        """Text deltas as they're written, then exactly one Step. Raises ModelError."""
+        """Text deltas as they're written, then exactly one Step. Raises ModelError. Closing it
+        early stops the response."""
         ...
 
 
@@ -197,6 +198,12 @@ class OpenAIModel:
             reasoning_effort=self.reasoning_effort,
         )
         try:
-            yield from read_stream(self._client.responses.create(**request, timeout=timeout))
+            response = self._client.responses.create(**request, timeout=timeout)
         except self._openai.APIError as exc:
             raise ModelError(f"OpenAI error: {exc}") from exc
+        try:
+            yield from read_stream(response)
+        except self._openai.APIError as exc:
+            raise ModelError(f"OpenAI error: {exc}") from exc
+        finally:
+            response.close()  # when the caller stops early too: OpenAI stops generating

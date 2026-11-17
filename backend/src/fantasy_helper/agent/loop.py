@@ -18,10 +18,10 @@ import json
 import logging
 import time
 from collections.abc import Callable, Iterator
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from fantasy_helper.agent.llm import ChatModel, ModelError, Step, TextDelta, Usage
+from fantasy_helper.agent.llm import ChatModel, ModelError, TextDelta, Usage
 from fantasy_helper.agent.prompt import instructions
 from fantasy_helper.agent.tools import TOOLS, result_text, run_tool
 from fantasy_helper.api.app import Ctx
@@ -65,78 +65,113 @@ def run_turn(
     settings = c.settings
     start = clock()
     deadline = start + settings.agent_deadline_seconds
-    usage, tools_called, steps = Usage(), [], 0
-    status = "error"
+    turn = _Turn(usage=Usage())
     try:
         system = instructions(c)
         specs = tool_specs()
         input: list[dict[str, Any]] = [{"role": m.role, "content": m.content} for m in messages]
-        for steps in range(1, settings.agent_max_steps + 1):
+        for turn.steps in range(1, settings.agent_max_steps + 1):
             remaining = deadline - clock()
             if remaining <= 1:
-                yield {"type": "error", "message": "This took too long, so it stopped. Try a narrower question."}
+                yield {"type": "error", "message": TOO_LONG}
                 break
-            last = steps == settings.agent_max_steps
-            step = None
-            for event in model.stream(system, input, specs, tool_choice="none" if last else "auto", timeout=remaining):
-                if isinstance(event, TextDelta):
-                    yield {"type": "text", "delta": event.text}
-                else:
-                    step = event
-            assert isinstance(step, Step), "a model stream ends with one Step"
-            usage.add(step.usage)
+            choice = "none" if turn.steps == settings.agent_max_steps else "auto"
+            step, turn.streaming = None, True
+            stream = model.stream(system, input, specs, tool_choice=choice, timeout=remaining)
+            try:
+                for event in stream:
+                    if clock() > deadline:  # a timeout only catches silence, not a model still writing
+                        break
+                    if isinstance(event, TextDelta):
+                        yield {"type": "text", "delta": event.text}
+                    else:
+                        step = event
+            finally:
+                stream.close()  # stops OpenAI generating when we stop reading
+            turn.streaming = False
+            if step is None:
+                turn.usage.known = False  # billed, but never reported
+                yield {"type": "notice", "message": TOO_LONG}
+                turn.status = "timeout"
+                break
+            turn.usage.add(step.usage)
             if step.status == "failed":
-                log.warning("agent step %d failed: %s", steps, step.reason)
+                log.warning("agent step %d failed: %s", turn.steps, step.reason)
                 yield {"type": "error", "message": "The model couldn't answer. Please try again."}
                 break
             input += step.items
             calls = [x for x in step.calls if x.complete]
             if step.status == "incomplete" and not calls:
                 yield {"type": "notice", "message": _cut_short(step.reason)}
-                status = "incomplete"
+                turn.status = "incomplete"
                 break
             if not calls:
-                status = "ok"
+                turn.status = "ok"
                 break
             for call in calls:
-                tools_called.append(call.name)
+                turn.tools.append(call.name)
                 yield from _call(c, call.call_id, call.name, call.arguments, input)
             if step.status == "incomplete":  # its finished calls ran; the rest of it is lost
                 yield {"type": "notice", "message": _cut_short(step.reason)}
-                status = "incomplete"
+                turn.status = "incomplete"
                 break
         else:  # the last step called tools anyway
             yield {"type": "error", "message": "This needed too many steps, so it stopped. Try a narrower question."}
     except ModelError as exc:
         log.warning("agent model error: %s", exc)
         yield {"type": "error", "message": "The model couldn't be reached. Please try again."}
+    except GeneratorExit:  # the visitor left and the stream was closed
+        turn.status = "closed"
+        raise
     except Exception:
         log.exception("agent turn failed")
         yield {"type": "error", "message": "Something went wrong on our side."}
-    cost = cost_usd(usage, settings)
-    latency = clock() - start
-    log.info(
-        "agent turn %s: %d steps, tools %s, %d in (%d cached) / %d out tokens, $%s, %.1f s",
-        status,
-        steps,
-        tools_called,
-        usage.input_tokens,
-        usage.cached_input_tokens,
-        usage.output_tokens,
-        "?" if cost is None else f"{cost:.4f}",
-        latency,
-    )
-    yield {
-        "type": "usage",
-        "model": model.name,
-        "status": status,
-        "steps": steps,
-        "tools": tools_called,
-        **asdict(usage),
-        "cost_usd": cost,
-        "seconds": round(latency, 2),
-    }
+    finally:
+        # Every turn is accounted for, a closed one too; nothing can be yielded here.
+        if turn.streaming:  # stopped inside a model response: billed, but its usage never came
+            turn.usage.known = False
+        summary = _summary(turn, model.name, cost_usd(turn.usage, settings), clock() - start)
+    yield summary
     yield {"type": "done"}
+
+
+TOO_LONG = "This took too long, so it stopped. Try a narrower question."
+
+
+@dataclass
+class _Turn:
+    usage: Usage
+    steps: int = 0
+    tools: list[str] = field(default_factory=list)
+    status: str = "error"  # ok / incomplete / timeout / error / closed (the visitor left)
+    streaming: bool = False  # a model response is being read
+
+
+def _summary(turn: _Turn, model: str, cost: float | None, seconds: float) -> dict[str, Any]:
+    """The turn's usage event, logged as it's made."""
+    u = turn.usage
+    log.info(
+        "agent turn %s: %d steps, tools %s, %d in (%d cached) / %d out tokens%s, $%s, %.1f s",
+        turn.status,
+        turn.steps,
+        turn.tools,
+        u.input_tokens,
+        u.cached_input_tokens,
+        u.output_tokens,
+        "" if u.known else " (some unreported)",
+        "?" if cost is None else f"{cost:.4f}",
+        seconds,
+    )
+    return {
+        "type": "usage",
+        "model": model,
+        "status": turn.status,
+        "steps": turn.steps,
+        "tools": turn.tools,
+        **asdict(u),
+        "cost_usd": cost,
+        "seconds": round(seconds, 2),
+    }
 
 
 def _call(c: Ctx, call_id: str, name: str, arguments: str, input: list[dict[str, Any]]) -> Iterator[dict[str, Any]]:
