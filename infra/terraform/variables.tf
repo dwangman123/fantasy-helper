@@ -26,6 +26,21 @@ variable "api_reserved_concurrency" {
   default     = null
 }
 
+variable "agent_daily_budget_usd" {
+  description = <<-EOT
+    The chat's spending cap: OpenAI dollars over any 24 hours, counting each turn in progress at
+    its worst-case cost. Past it the chat answers "try again tomorrow".
+  EOT
+  type        = number
+  default     = 1
+}
+
+variable "agent_visitor_daily_messages" {
+  description = "Chat messages one visitor (by IP address) can send in 24 hours."
+  type        = number
+  default     = 30
+}
+
 variable "api_streaming" {
   description = <<-EOT
     Send API responses to the client as they're written (the function URL's RESPONSE_STREAM mode

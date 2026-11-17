@@ -5,7 +5,8 @@ calls its tools again rather than seeing earlier results). Only the latest turns
 (`recent`), so a long chat costs no more per turn than a short one. Every HTTP status is decided before
 the stream starts, since a streamed response can't change it later: 422 for a malformed body,
 400 for a conversation that doesn't end with a question, 503 when the agent isn't configured,
-404 when no league is stored. Once streaming, problems arrive as an `error` event, and `done`
+404 when no league is stored, 429 over the spending cap (guard.py), which reserves the turn's
+worst-case cost here and settles it when the turn ends. Once streaming, problems arrive as an `error` event, and `done`
 always comes last. See loop.py for the events.
 """
 
@@ -18,6 +19,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from fantasy_helper.agent.guard import Refused, header_shape, reserve, settle, visitor_ip, visitor_key
 from fantasy_helper.agent.llm import ChatModel, OpenAIModel
 from fantasy_helper.agent.loop import Message, run_turn
 from fantasy_helper.api.app import Ctx
@@ -92,25 +94,48 @@ def public(event: dict[str, Any]) -> dict[str, Any]:
 def agent(body: AgentIn, request: Request):
     state = request.app.state
     settings: Settings = state.settings
+    # Before any refusal, so it's logged while the chat is still off: what the visitor rule can rely on.
+    log.info("agent request headers: %s", header_shape(request.headers))
     if not settings.agent_configured:
         return JSONResponse(status_code=503, content={"detail": "The chat isn't set up yet."})
     if body.messages[-1].role != "user":
         return JSONResponse(status_code=400, content={"detail": "The conversation must end with a question."})
     with state.sessionmaker() as session:
         Ctx(session, settings, state.cache)  # raises LookupError (404) with no league stored
-    # Phase 4's spending cap goes here, before the stream starts, so it can answer 429.
+    ip = visitor_ip(request.headers, request.client.host if request.client else None)
+    salt = settings.agent_visitor_salt or settings.openai_api_key or ""
+    try:
+        row_id = reserve(state.sessionmaker, settings, visitor_key(ip, salt))
+    except Refused as exc:
+        return JSONResponse(status_code=exc.status, content={"detail": exc.message})
     messages = [Message(m.role, m.content) for m in recent(body.messages)]
     factory: Callable[[Settings], ChatModel] = state.agent_model_factory
-    return StreamingResponse(_events(state, factory, messages), media_type="text/event-stream", headers=STREAM_HEADERS)
+    return StreamingResponse(
+        _events(state, factory, messages, row_id), media_type="text/event-stream", headers=STREAM_HEADERS
+    )
 
 
-def _events(state: Any, factory: Callable[[Settings], ChatModel], messages: list[Message]) -> Iterator[str]:
+def _events(
+    state: Any, factory: Callable[[Settings], ChatModel], messages: list[Message], row_id: int
+) -> Iterator[str]:
     yield sse({"type": "start"})  # at once, so the page knows it's working
+    try:
+        model = factory(state.settings)
+    except Exception:
+        log.exception("agent model couldn't be made")
+        settle(state.sessionmaker, row_id, {"status": "error", "known": True, "cost_usd": 0.0})  # nothing was spent
+        yield sse({"type": "error", "message": "Something went wrong on our side."})
+        yield sse({"type": "done"})
+        return
     try:
         with state.sessionmaker() as session:  # its own: the request's is gone once streaming starts
             c = Ctx(session, state.settings, state.cache)
-            for event in run_turn(c, factory(state.settings), messages):
-                yield sse(public(event))
+            turn = run_turn(c, model, messages, on_finish=lambda summary: settle(state.sessionmaker, row_id, summary))
+            try:
+                for event in turn:
+                    yield sse(public(event))
+            finally:
+                turn.close()  # settles the turn now, if the visitor left, while the session is open
     except Exception:
         log.exception("agent stream failed")
         yield sse({"type": "error", "message": "Something went wrong on our side."})

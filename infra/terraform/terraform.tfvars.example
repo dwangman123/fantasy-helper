@@ -2,3 +2,5 @@
 alert_email = "you@example.com"
 # monthly_budget_usd       = 5
 # api_reserved_concurrency = 5   # only if your Lambda concurrency quota is above 10
+# agent_daily_budget_usd       = 1    # the chat's OpenAI spending over any 24 hours
+# agent_visitor_daily_messages = 30

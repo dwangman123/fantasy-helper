@@ -29,7 +29,14 @@ PRICES = {"agent_input_price": 2.0, "agent_cached_input_price": 0.2, "agent_outp
 
 
 def agent_settings(**kw):
-    defaults = {"openai_api_key": "test-key", "agent_model": "scripted", **PRICES}
+    # A cap high enough not to get in the way; test_agent_guard.py tests the cap.
+    defaults = {
+        "openai_api_key": "test-key",
+        "agent_model": "scripted",
+        **PRICES,
+        "agent_daily_budget_usd": 1000.0,
+        "agent_visitor_daily_messages": 1000,
+    }
     return Settings(season=SEASON, my_team_id=MY_TEAM, database_url="sqlite://", **(defaults | kw))
 
 

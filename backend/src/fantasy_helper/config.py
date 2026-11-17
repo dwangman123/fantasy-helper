@@ -52,6 +52,14 @@ class Settings(BaseSettings):
     agent_max_steps: int = 6  # model calls per turn; the last can't call tools
     # Below the API function's 90 s timeout (infra/terraform), with room to send the last events.
     agent_deadline_seconds: float = 75.0
+    # The spending cap (agent/guard.py), over the last 24 hours. Each turn reserves its worst case
+    # before it starts: agent_max_steps model calls, each with up to agent_reserve_input_tokens in
+    # and agent_max_output_tokens out.
+    agent_daily_budget_usd: float = 1.0
+    agent_visitor_daily_messages: int = 30
+    agent_reserve_input_tokens: int = 40_000
+    # Salts the hash of each visitor's IP address; falls back to the OpenAI key, also secret.
+    agent_visitor_salt: str | None = None
 
     @property
     def agent_configured(self) -> bool:

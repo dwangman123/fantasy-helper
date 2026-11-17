@@ -8,6 +8,7 @@ unless `team_id` says otherwise.
 
 import argparse
 import json
+import logging
 import threading
 import time
 from collections import OrderedDict
@@ -898,6 +899,19 @@ def waivers(c: CtxDep, team_id: int | None = None, same_day: bool = False):
     )
 
 
+def log_to_stderr() -> None:
+    """Send the app's INFO lines (each agent turn, the ingest's progress) to stderr. Under uvicorn,
+    as deployed, nothing else gives them a handler, so they'd be dropped; Lambda's runtime and
+    pytest bring their own, and then this does nothing."""
+    app_log = logging.getLogger("fantasy_helper")
+    if logging.getLogger().handlers or app_log.handlers:
+        return
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+    app_log.addHandler(handler)
+    app_log.setLevel(logging.INFO)
+
+
 def create_app(
     session_factory: sessionmaker | None = None,
     settings: Settings | None = None,
@@ -908,6 +922,7 @@ def create_app(
     from fantasy_helper.agent.routes import openai_model
     from fantasy_helper.agent.routes import router as agent_router
 
+    log_to_stderr()
     app = FastAPI(title="Fantasy Helper", version="0.1.0")
     app.state.sessionmaker = session_factory or get_sessionmaker()
     app.state.settings = settings or get_settings()
