@@ -57,12 +57,14 @@ def worst_case_usd(settings: Settings) -> float:
 def visitor_ip(headers: Mapping[str, str], client_host: str | None) -> str:
     """The visitor's IP address, from the headers a proxy adds.
 
-    Through the site, Vercel's proxy makes the request, so the connection's own address is
-    Vercel's; Lambda appends the connecting address as the *last* X-Forwarded-For entry, and
-    entries before it come from the client unchecked. Which of these headers reach the API through
-    Vercel's rewrite isn't verified yet (see `header_shape`), so for now: Vercel's own headers
-    first, then the first X-Forwarded-For entry (spoofable by someone calling the function URL
-    directly, which only gets them past the per-visitor limit, not the budget)."""
+    Checked on the deployed API on 2026-11-18 (`header_shape`'s log lines):
+      - Through the site, Vercel's proxy makes the request, so the connecting address is
+        Vercel's. Vercel sends the visitor's address in x-vercel-forwarded-for, x-real-ip and
+        X-Forwarded-For (one entry), overwriting any value the visitor sent.
+      - Straight to the function URL, X-Forwarded-For is the caller's own header passed through
+        unchanged (AWS appends nothing), or the connecting address when there is none.
+    So Vercel's headers come first. Someone calling the function URL directly can send any of
+    these headers and get past the per-visitor limit, but not the budget."""
     lower = {k.lower(): v for k, v in headers.items()}
     for name in ("x-vercel-forwarded-for", "x-real-ip"):
         if value := lower.get(name, "").split(",")[0].strip():
