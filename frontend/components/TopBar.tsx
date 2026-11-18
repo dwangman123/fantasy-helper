@@ -35,8 +35,12 @@ export function TopBar() {
           ))}
         </nav>
         {league && (
-          <div className="topbar-meta">
+          <div className="topbar-team">
             <TeamChooser teams={league.teams} />
+          </div>
+        )}
+        {league && (
+          <div className="topbar-meta">
             <span>
               {league.name} · data from {dateTime(league.data_as_of)}
             </span>

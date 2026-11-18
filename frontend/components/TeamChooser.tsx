@@ -35,7 +35,7 @@ export function TeamChooser({ teams }: { teams: Team[] }) {
   return (
     <>
       <button type="button" className="team-pick" onClick={() => setReopened(true)}>
-        {current ? `Default team: ${current.owner}` : "Pick a default team"}
+        {current ? `My team: ${current.owner}` : "Pick my team"}
       </button>
       <dialog ref={dialog} className="team-chooser" aria-labelledby="team-chooser-title" onClose={onClose}>
         <h2 id="team-chooser-title">Which team is yours?</h2>
@@ -65,7 +65,7 @@ export function TeamChooser({ teams }: { teams: Team[] }) {
             <>
               {current && (
                 <button type="button" onClick={() => choose(null)}>
-                  No default team
+                  Clear my team
                 </button>
               )}
               <button type="button" onClick={() => setReopened(false)}>
