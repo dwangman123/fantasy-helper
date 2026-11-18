@@ -11,7 +11,8 @@ browser -> Next.js (Vercel) -- /api/* --> API (Lambda function URL)
 The two functions run two targets of one image (`backend/Dockerfile`): the API as a web server
 (uvicorn) behind the [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter), which
 lets a function URL stream a response, and the ingest as a plain Lambda handler. Both read their settings from one JSON
-secret, `fantasy-helper/app` (`{"FH_DATABASE_URL": "..."}`), through `FH_SECRET_ID`. Reads are
+secret, `fantasy-helper/app` (`{"FH_DATABASE_URL": "...", "FH_OPENAI_API_KEY": "...", ...}`), through
+`FH_SECRET_ID`. Reads are
 public. A Refresh within 2 minutes of the last successful ingest returns that run, and a Postgres
 advisory lock keeps a Refresh and the scheduled ingest from overlapping.
 
@@ -20,7 +21,9 @@ logs. Lambda stays inside its always-free tier (1M requests and 400,000 GB-secon
 Vercel Hobby is free. Neon's free plan allows 0.5 GB of storage, 100 CU-hours of compute and 5 GB
 of network transfer per month. Transfer is the limit to watch late in the season, since each
 context load reads the box-score history (Neon's console shows usage). Set `alert_email` to get
-an AWS Budgets email at 80% of $5.
+an AWS Budgets email at 80% of $5. The chat's OpenAI usage is billed by OpenAI on top, and the
+app caps it at `agent_daily_budget_usd` ($1) over any 24 hours. Measured on the live site, a
+question costs $0.0001–0.001. Setting a monthly budget on the OpenAI project is a second backstop.
 
 **You need:** an AWS account, a [Neon](https://neon.com) account and a [Vercel](https://vercel.com)
 account; the AWS CLI with a profile (`brew install awscli`, then `aws configure sso` or
@@ -100,3 +103,16 @@ brew install hashicorp/tap/terraform`).
   `-var api_streaming=false`.
 - **Changing the secret:** each function reads it once per cold start, so a new value applies
   after the next deploy, or once Lambda recycles its environments.
+- **Turning on the chat:** until it's set up, every question gets "The chat isn't set up yet." Add
+  five keys to `fantasy-helper/app`, keeping `FH_DATABASE_URL`: `FH_OPENAI_API_KEY`,
+  `FH_AGENT_MODEL` (e.g. `gpt-6-luna`), and that model's prices in USD per million tokens from
+  OpenAI's pricing page, `FH_AGENT_INPUT_PRICE`, `FH_AGENT_CACHED_INPUT_PRICE` and
+  `FH_AGENT_OUTPUT_PRICE`. In the console: Retrieve secret value > Edit > Key/value, add a row
+  for each, then Save. `put-secret-value` replaces the whole secret, so from the CLI write back the
+  existing keys too. Then run Actions > Deploy on `main`. The spending limits are Terraform
+  variables, `agent_daily_budget_usd` and `agent_visitor_daily_messages`. A turn whose worst case
+  costs more than the whole daily budget turns the chat off with a 503 and a log line naming the
+  settings to change.
+- **Visitor addresses:** the API runs uvicorn with `--no-access-log`. uvicorn takes the client
+  address from `X-Forwarded-For` (the adapter connects from 127.0.0.1), so its access log would
+  write each visitor's IP to CloudWatch. The chat's spending cap stores only a salted hash.

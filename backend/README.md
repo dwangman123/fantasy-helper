@@ -41,7 +41,7 @@ espn/client.py --> espn/parse.py --> domain.py (LeagueSnapshot)
 6. **Services.** [`predict.py`](src/fantasy_helper/predict.py), [`waivers.py`](src/fantasy_helper/waivers.py) and [`trades.py`](src/fantasy_helper/trades.py) combine a context with the analytics for one team. They return reports that carry their assumptions, so the UI can state them.
 7. **API** ([`api/app.py`](src/fantasy_helper/api/app.py)). Serves the services' results, cached in memory per snapshot.
 
-When deployed, the [`Dockerfile`](Dockerfile) builds two images from one base. The `api` target runs the FastAPI app with uvicorn behind the [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter), so a response can be streamed as it's written. The `ingest` target runs the scheduled job, a plain Lambda handler in [`aws.py`](src/fantasy_helper/aws.py).
+When deployed, the [`Dockerfile`](Dockerfile) builds two images from one base. The `api` target runs the FastAPI app with uvicorn behind the [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter), so a response can be streamed as it's written. Its access log is off (`--no-access-log`), since uvicorn takes the client address from `X-Forwarded-For` and each line would hold a visitor's IP. The `ingest` target runs the scheduled job, a plain Lambda handler in [`aws.py`](src/fantasy_helper/aws.py).
 
 ## Module guide
 
