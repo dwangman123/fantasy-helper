@@ -18,7 +18,7 @@ Fantasy Helper pulls the whole league from ESPN every hour, or on demand with Re
 
 ## What it does
 
-The league scores **FG%, FT%, 3PM, REB, AST, STL, BLK, TO and PTS** head to head, most categories wins, with ties allowed. Each team starts 10 players a day. The app has five pages. Anyone in the league can look at any team, so no view assumes whose it is. A chat assistant that answers questions with the same numbers is in progress: its tools are built, the chat isn't yet.
+The league scores **FG%, FT%, 3PM, REB, AST, STL, BLK, TO and PTS** head to head, most categories wins, with ties allowed. Each team starts 10 players a day. The app has six pages. Anyone in the league can look at any team, so no view assumes whose it is. The sixth is a chat assistant that answers questions in plain English with the same numbers.
 
 ### Matchup: who wins this week, and why
 
@@ -68,6 +68,12 @@ Any deal of up to three players a side can also be scored by hand.
 ![A scored deal: each side's change in categories won per week and in each category's odds](docs/screenshots/trades-deal.png)
 
 </details>
+
+### Chat: ask about the league in plain English
+
+Ask something like *"Who should I pick up to win steals this week?"* and an assistant answers with the app's own numbers. Its tools are the calculations behind the other pages: matchup odds, team profiles, the category heatmap, power rankings, waiver and trade rankings, and player lookups. A line shows each tool as it runs, and the answer streams in as it's written. The model, from OpenAI, only picks the tools and explains what they return; every number comes from a tool. "My team" means the site owner's, and any other team can be named by its owner.
+
+The conversation stays in the browser tab and isn't stored. The server keeps only each answer's tokens, cost and tools, for a spending cap: $1 a day across everyone, and 30 questions a day per visitor. A question costs well under a cent.
 
 ## How players are valued: G-scores
 
@@ -158,13 +164,15 @@ flowchart LR
     ingest["Ingest<br/>AWS Lambda"] --> db[("Postgres<br/>Neon")]
     db --> api["REST API<br/>AWS Lambda<br/>FastAPI + uvicorn"]
     api -- "/api/* rewrite" --> web["Next.js<br/>Vercel"]
+    api -- "chat turns" --> openai["OpenAI API<br/>chat model"]
     web --> user(["Browser"])
 ```
 
-- **Ingest.** It pulls one consistent snapshot of the league from ESPN and cross-checks it, then stores it and appends the week's matchup predictions. Each run is logged with its warnings. The app's Refresh button runs the same job inside the API Lambda, and a Postgres advisory lock keeps it and the hourly run from overlapping. Both Lambdas read the database URL from Secrets Manager.
+- **Ingest.** It pulls one consistent snapshot of the league from ESPN and cross-checks it, then stores it and appends the week's matchup predictions. Each run is logged with its warnings. The app's Refresh button runs the same job inside the API Lambda, and a Postgres advisory lock keeps it and the hourly run from overlapping. Both Lambdas read their settings from one Secrets Manager secret: the database URL, and for the API the OpenAI key.
 - **Analytics.** These are pure functions over ESPN-independent domain types, with no database or network access. So the same models run behind the API, the CLI tools and the tests.
 - **API.** It serves each view from one team's side and caches simulations in memory per snapshot. On Lambda it runs as a web server (uvicorn) behind the [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter), so a response can stream as it's written. The frontend is a thin client: it only formats what the API returns.
-- **Deploys.** The two Lambdas run two targets of one container image. GitHub Actions deploys after CI passes on `main`: the backend first (migrate, update both functions, smoke-test them, roll back if that fails), then the frontend. Terraform defines the AWS side. The whole thing is estimated at about $1 a month.
+- **Chat.** `POST /api/agent` runs one turn: OpenAI's model calls the app's tools, the API runs them against the same cached snapshot the pages use, and the answer streams back as server-sent events. Before a turn starts, it reserves its worst-case cost in Postgres, and it settles to the real cost when it ends, so the daily cap holds even with several visitors at once. Visitor IP addresses aren't stored or logged: the cap keys each visitor by a salted hash, and the API's access log is off.
+- **Deploys.** The two Lambdas run two targets of one container image. GitHub Actions deploys after CI passes on `main`: the backend first (migrate, update both functions, smoke-test them, roll back if that fails), then the frontend. Terraform defines the AWS side. The whole thing is estimated at about $1 a month, plus the chat's OpenAI usage, which the app caps at $1 a day.
 
 Inside the backend, data flows one way:
 
@@ -184,7 +192,7 @@ flowchart TB
 
 | Layer | Built with |
 |---|---|
-| **Backend** | Python 3.12, FastAPI, SQLAlchemy + Alembic, NumPy, SciPy, [espn-api](https://github.com/cwendt94/espn-api), uv, Ruff, pytest |
+| **Backend** | Python 3.12, FastAPI, SQLAlchemy + Alembic, NumPy, SciPy, [espn-api](https://github.com/cwendt94/espn-api), OpenAI Responses API, uv, Ruff, pytest |
 | **Frontend** | Next.js 16 (App Router), React 19, TanStack Query, plain CSS with light and dark themes |
 | **Infrastructure** | AWS Lambda (container images on ECR, Lambda Web Adapter), EventBridge Scheduler, Secrets Manager, Neon Postgres, Vercel, Terraform, GitHub Actions |
 
