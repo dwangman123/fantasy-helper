@@ -210,7 +210,8 @@ def test_the_deadline_stops_a_model_still_writing(engine, cache):
     assert "".join(e["delta"] for e in events if e["type"] == "text") == "one two "
     assert kinds(events) == ["text", "notice", "usage", "done"] and closed == [True]
     usage = events[-2]
-    assert usage["status"] == "timeout" and not usage["known"] and usage["cost_usd"] is None
+    assert usage["status"] == "timeout" and not usage["known"] and usage["unreported_steps"] == 1
+    assert usage["cost_usd"] == 0.0  # no tokens were reported; the unreported step is priced when settled
 
 
 def test_a_turn_closed_by_the_visitor_is_still_logged(engine, cache, caplog):
@@ -219,7 +220,7 @@ def test_a_turn_closed_by_the_visitor_is_still_logged(engine, cache, caplog):
         events = run_turn(Ctx(s, agent_settings(), cache), model, [Message("user", "Hi")])
         assert next(events)["type"] == "text"
         events.close()  # what Starlette does when the visitor leaves
-    assert "agent turn closed: 1 steps" in caplog.text and "(some unreported)" in caplog.text
+    assert "agent turn closed: 1 steps" in caplog.text and "(+1 steps unreported)" in caplog.text
 
 
 def test_a_failed_response_is_an_error_but_still_counts_its_tokens(engine, cache):
@@ -250,10 +251,10 @@ def test_an_unreachable_model_is_an_error_event(engine, cache):
     assert "couldn't be reached" in events[0]["message"] and events[-2]["steps"] == 1
 
 
-def test_unknown_usage_has_no_cost():
-    settings = agent_settings()
-    assert cost_usd(Usage(known=False), settings) is None
-    assert cost_usd(Usage(1_000_000, 0, 0, 0), settings) == pytest.approx(2.0)
+def test_cost_prices_the_reported_tokens_and_needs_prices():
+    assert cost_usd(Usage(1_000_000, 0, 0, 0), agent_settings()) == pytest.approx(2.0)
+    assert cost_usd(Usage(1_000_000, 0, 0, 0, known=False), agent_settings()) == pytest.approx(2.0)
+    assert cost_usd(Usage(1_000_000, 0, 0, 0), agent_settings(agent_output_price=None)) is None
 
 
 def test_tool_specs_are_strict_functions():
@@ -529,3 +530,61 @@ def test_no_stored_league_is_a_404_not_a_broken_stream():
     app = create_app(sessionmaker(bind=empty), agent_settings(), agent_model=lambda s: ScriptedModel())
     response = post(TestClient(app), [{"role": "user", "content": "hi"}])
     assert response.status_code == 404 and "run fh-ingest" in response.json()["detail"]
+
+
+# --- Closing a turn when the visitor leaves ----------------------------------------------------
+
+
+def _turn_events(closed, pause=0.0):
+    import time
+
+    try:
+        for n in range(1, 6):
+            yield f"data: {n}\n\n"
+            time.sleep(pause)
+    finally:
+        closed.append(True)
+
+
+def test_a_failed_send_closes_the_turn():
+    """ASGI 2.4 servers: Starlette learns the visitor left when a send fails."""
+    import anyio
+    from starlette.requests import ClientDisconnect
+
+    from fantasy_helper.agent.routes import TurnResponse
+
+    closed, sent = [], []
+
+    async def send(message):
+        sent.append(message)
+        if message["type"] == "http.response.body" and len(sent) >= 3:
+            raise OSError("the visitor left")
+
+    async def receive():
+        await anyio.sleep(60)
+
+    response = TurnResponse(_turn_events(closed), media_type="text/event-stream")
+    with pytest.raises(ClientDisconnect):
+        anyio.run(response, {"type": "http", "asgi": {"spec_version": "2.4"}}, receive, send)
+    assert closed == [True]
+
+
+def test_a_disconnect_message_closes_the_turn():
+    """Older ASGI servers, uvicorn among them: Starlette cancels the stream on http.disconnect."""
+    import anyio
+
+    from fantasy_helper.agent.routes import TurnResponse
+
+    closed, sent = [], []
+
+    async def send(message):
+        sent.append(message)
+
+    async def receive():
+        await anyio.sleep(0.15)
+        return {"type": "http.disconnect"}
+
+    response = TurnResponse(_turn_events(closed, pause=0.1), media_type="text/event-stream")
+    anyio.run(response, {"type": "http", "asgi": {"spec_version": "2.3"}}, receive, send)
+    bodies = [m for m in sent if m["type"] == "http.response.body" and m["body"]]
+    assert closed == [True] and len(bodies) < 5  # it stopped early, and the generator was closed

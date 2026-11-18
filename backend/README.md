@@ -115,7 +115,7 @@ Matchup, lineup, waiver and trade views are from one team's side (`me` / `opp`, 
 | GET | `/api/trades` | `team_id` | Deals found that help both teams | Trades |
 | GET | `/api/waivers` | `team_id`, `same_day` | Category board, stream and hold rankings | Waivers |
 | POST | `/api/refresh` | | The ingest run | Refresh button |
-| POST | `/api/agent` | | One chat turn as server-sent events; body `{"messages": [{"role": "user" or "assistant", "content": "..."}]}`, ending with a question. 503 until configured, 429 over the spending cap | Chat (coming) |
+| POST | `/api/agent` | | One chat turn as server-sent events; body `{"messages": [{"role": "user" or "assistant", "content": "..."}]}`, ending with a question. 503 until configured, 429 over the spending cap | Chat |
 
 `partner_id`, `give` and `get` are required on `/api/trade`. All other query params are optional.
 

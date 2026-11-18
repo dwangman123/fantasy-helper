@@ -984,3 +984,139 @@ a.info:hover {
   flex-direction: column;
   gap: 4px;
 }
+
+/* Chat page */
+
+.chat {
+  max-width: 760px;
+}
+
+.chat-log {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 120px;
+}
+
+.chat-starters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chat-starters button {
+  cursor: pointer;
+  text-align: left;
+  color: var(--ink-2);
+}
+
+.chat-starters button:hover {
+  color: var(--ink);
+  border-color: var(--axis);
+}
+
+.chat-msg {
+  border-radius: 10px;
+  padding: 12px 16px;
+  overflow-wrap: anywhere;
+}
+
+.chat-msg.question {
+  align-self: flex-end;
+  max-width: 85%;
+  background: var(--win-wash);
+  white-space: pre-wrap;
+}
+
+.chat-msg.answer {
+  align-self: stretch;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.chat-text p,
+.chat-text ul,
+.chat-text ol {
+  margin: 0 0 8px;
+}
+
+.chat-text > :last-child {
+  margin-bottom: 0;
+}
+
+.chat-text ul,
+.chat-text ol {
+  padding-left: 22px;
+}
+
+.chat-text code {
+  font-size: 13px;
+  background: var(--grid);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+.chat-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+
+.chat-steps li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-steps li.done span {
+  color: var(--good-text);
+}
+
+.chat-steps li.failed span {
+  color: var(--critical);
+}
+
+.chat-form {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.chat-form textarea {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.chat-form textarea:disabled {
+  opacity: 0.6;
+}
+
+.chat-form button {
+  cursor: pointer;
+}
+
+.chat-form button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+button.primary {
+  background: var(--win);
+  border-color: var(--win);
+  color: #fff;
+}
