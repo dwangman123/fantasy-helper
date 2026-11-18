@@ -13,6 +13,7 @@ const LINKS = [
   { href: "/league", label: "League" },
   { href: "/waivers", label: "Waivers" },
   { href: "/trades", label: "Trades" },
+  { href: "/chat", label: "Chat" },
 ];
 
 export function TopBar() {

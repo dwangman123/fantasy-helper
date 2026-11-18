@@ -46,10 +46,11 @@ def tool_specs() -> list[dict[str, Any]]:
 
 
 def cost_usd(usage: Usage, settings: Settings) -> float | None:
-    """Cached tokens are part of input_tokens and billed at the cached rate; reasoning tokens
-    are part of output_tokens. None when usage or a price isn't known."""
+    """The reported tokens' cost: cached tokens are part of input_tokens and billed at the cached
+    rate, reasoning tokens part of output_tokens. A step whose usage never came isn't in it (the
+    usage event's `unreported_steps`). None when a price isn't set."""
     prices = (settings.agent_input_price, settings.agent_cached_input_price, settings.agent_output_price)
-    if not usage.known or None in prices:
+    if None in prices:
         return None
     full, cached, out = prices
     uncached = usage.input_tokens - usage.cached_input_tokens
@@ -93,11 +94,13 @@ def run_turn(
                 stream.close()  # stops OpenAI generating when we stop reading
             turn.streaming = False
             if step is None:
-                turn.usage.known = False  # billed, but never reported
+                turn.unreported += 1  # billed, but never reported
+                turn.usage.known = False
                 yield {"type": "notice", "message": TOO_LONG}
                 turn.status = "timeout"
                 break
             turn.usage.add(step.usage)
+            turn.unreported += not step.usage.known
             if step.status == "failed":
                 log.warning("agent step %d failed: %s", turn.steps, step.reason)
                 yield {"type": "error", "message": "The model couldn't answer. Please try again."}
@@ -132,6 +135,7 @@ def run_turn(
     finally:
         # Every turn is accounted for, a closed one too; nothing can be yielded here.
         if turn.streaming:  # stopped inside a model response: billed, but its usage never came
+            turn.unreported += 1
             turn.usage.known = False
         summary = _summary(turn, model.name, cost_usd(turn.usage, settings), clock() - start)
         if on_finish is not None:
@@ -153,6 +157,7 @@ class _Turn:
     tools: list[str] = field(default_factory=list)
     status: str = "error"  # ok / incomplete / timeout / error / closed (the visitor left)
     streaming: bool = False  # a model response is being read
+    unreported: int = 0  # steps billed whose usage never came
 
 
 def _summary(turn: _Turn, model: str, cost: float | None, seconds: float) -> dict[str, Any]:
@@ -166,7 +171,7 @@ def _summary(turn: _Turn, model: str, cost: float | None, seconds: float) -> dic
         u.input_tokens,
         u.cached_input_tokens,
         u.output_tokens,
-        "" if u.known else " (some unreported)",
+        f" (+{turn.unreported} steps unreported)" if turn.unreported else "",
         "?" if cost is None else f"{cost:.4f}",
         seconds,
     )
@@ -177,7 +182,8 @@ def _summary(turn: _Turn, model: str, cost: float | None, seconds: float) -> dic
         "steps": turn.steps,
         "tools": turn.tools,
         **asdict(u),
-        "cost_usd": cost,
+        "cost_usd": cost,  # of the reported tokens
+        "unreported_steps": turn.unreported,
         "seconds": round(seconds, 2),
     }
 

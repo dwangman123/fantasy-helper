@@ -27,10 +27,11 @@ Install, dev server and build are in [docs/development.md](../docs/development.m
 | `useTrade(teamId, partnerId, give, receive)` | `GET /api/trade` |
 | `useTrades(teamId)` | `GET /api/trades` |
 | `useRefresh()` | `POST /api/refresh` |
+| `askAgent(messages, onEvent, signal)` in [`lib/agent.ts`](lib/agent.ts) | `POST /api/agent`, read as a stream of events (not a query hook: a turn isn't cached) |
 
 ## Pages
 
-The five pages are client components. [`app/layout.tsx`](app/layout.tsx) wraps them all in the query provider and the [`TopBar`](components/TopBar.tsx). The top bar has the nav links, the "data from" time and the Refresh button. When the last ingest failed or had warnings, it also shows them in a banner. `/` redirects to `/matchup`.
+The six pages are client components. [`app/layout.tsx`](app/layout.tsx) wraps them all in the query provider and the [`TopBar`](components/TopBar.tsx). The top bar has the nav links, the "data from" time and the Refresh button. When the last ingest failed or had warnings, it also shows them in a banner. `/` redirects to `/matchup`.
 
 | Route | Shows | Hooks | Main components |
 |---|---|---|---|
@@ -39,6 +40,7 @@ The five pages are client components. [`app/layout.tsx`](app/layout.tsx) wraps t
 | [`/league`](app/league/page.tsx) | Power rankings and the 10-team category heatmap | `useLeague`, `usePower`, `useProfiles` | `ZShade` |
 | [`/waivers`](app/waivers/page.tsx) | Category board, then free agents ranked two ways: stream (this week's odds) and hold (rest of season) | `useLeague`, `useWaivers` | `TeamSelect`, `LabelChip`, `OddsBar`, `DeltaBar`, `Effects`, `PlayerCell` |
 | [`/trades`](app/trades/page.tsx) | Deals found that help both teams, and a builder to score any deal of up to 3 players a side | `useLeague`, `useTrades`, `useTeam` (both rosters), `useTrade` | `TeamSelect`, `DeltaBar`, `Effects`, `PlayerCell` |
+| [`/chat`](app/chat/page.tsx) | The chat assistant: ask about the league, see each tool it runs and the answer as it's written. The conversation stays in the tab (`sessionStorage`). "My team" in a question is the site owner's | `askAgent` ([`lib/agent.ts`](lib/agent.ts)) | `Markdown` |
 
 ### URL state
 
@@ -66,6 +68,7 @@ The four pages that read these params (Matchup, Team, Waivers, Trades) render th
 | [`OddsHistory`](components/OddsHistory.tsx) | Both teams' win odds after each ingest, across the week (SVG) |
 | [`OddsBar`](components/OddsBar.tsx) | Win / tie / loss as one 100% bar, plus `OddsLegend` |
 | [`DeltaBar`](components/DeltaBar.tsx) | A signed change as a bar from a center line: blue right when it helps, red left when it hurts |
+| [`Markdown`](components/Markdown.tsx) | The little Markdown the chat's model writes (paragraphs, lists, bold, italic, code), as React elements: nothing is parsed as HTML |
 | [`Effects`](components/Effects.tsx) | Chips for the categories a move changes most; categories that flip lead and are bold |
 | [`LabelChip`](components/LabelChip.tsx) | A locked / swing / lost category label |
 | [`ZShade`](components/ZShade.tsx) | `zClass(z)` for z-score cell shading, plus `ZLegend` |

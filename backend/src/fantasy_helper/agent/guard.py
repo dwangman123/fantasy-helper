@@ -5,8 +5,9 @@ one visitor sent (`agent_visitor_daily_messages`). The budget is the real protec
 is told apart only by IP address, which a determined one can change.
 
 Each turn reserves its worst-case cost in `agent_usage` before it starts and is settled to its
-real cost when it ends (`settle`). A turn that never reports back, killed at the Lambda timeout
-or with usage never reported, keeps its reservation, so the cap never undercounts. Two turns
+real cost when it ends (`settle`). A turn that never reports back (killed at the Lambda timeout)
+keeps its reservation; one cut off mid-step is charged one model call's worst case for each step
+whose usage never came. Either way the cap never undercounts. Two turns
 checked at the same moment could each pass; on Postgres a transaction-level advisory lock
 makes the check and the reservation one step.
 """
@@ -38,12 +39,16 @@ class Refused(Exception):
         self.message = message
 
 
+def worst_step_usd(settings: Settings) -> float:
+    """The most one model call can cost: the input ceiling and the output limit."""
+    tokens_usd = settings.agent_reserve_input_tokens * (settings.agent_input_price or 0.0)
+    tokens_usd += settings.agent_max_output_tokens * (settings.agent_output_price or 0.0)
+    return tokens_usd / 1_000_000
+
+
 def worst_case_usd(settings: Settings) -> float:
-    """The most one turn can cost: every step at the input ceiling and the output limit."""
-    per_step = settings.agent_reserve_input_tokens * (
-        settings.agent_input_price or 0.0
-    ) + settings.agent_max_output_tokens * (settings.agent_output_price or 0.0)
-    return settings.agent_max_steps * per_step / 1_000_000
+    """The most one turn can cost: every step at its worst."""
+    return settings.agent_max_steps * worst_step_usd(settings)
 
 
 # --- Who's asking ----------------------------------------------------------------------------
@@ -162,17 +167,22 @@ def reserve(Sessions: sessionmaker, settings: Settings, visitor: str, now: datet
         return row.id
 
 
-def settle(Sessions: sessionmaker, row_id: int, summary: dict[str, Any]) -> None:
-    """Record a finished turn from its usage event, in a session of its own. Known usage replaces
-    the reservation with the real cost; unknown usage keeps the reservation."""
+def settle(Sessions: sessionmaker, row_id: int, summary: dict[str, Any], step_usd: float) -> None:
+    """Record a finished turn from its usage event, in a session of its own. The cost is what its
+    reported tokens cost, plus `step_usd` (one model call's worst case) for each step whose usage
+    never came, such as one cut off when the visitor left; never more than the reservation. With
+    no cost at all, the reservation stands."""
     with Sessions.begin() as session:
         row = session.get(m.AgentUsage, row_id)
         if row is None:
             return
-        known = bool(summary.get("known")) and summary.get("cost_usd") is not None
+        reported, unreported = summary.get("cost_usd"), int(summary.get("unreported_steps", 0))
         row.status = summary.get("status", "error")
-        row.usage_known = known
-        row.cost_usd = float(summary["cost_usd"]) if known else row.reserved_usd
+        row.usage_known = reported is not None and unreported == 0
+        if reported is None:
+            row.cost_usd = row.reserved_usd
+        else:
+            row.cost_usd = min(row.reserved_usd, float(reported) + unreported * step_usd)
         row.steps = int(summary.get("steps", 0))
         row.tools = list(summary.get("tools", []))
         row.input_tokens = int(summary.get("input_tokens", 0))

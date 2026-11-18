@@ -18,6 +18,7 @@ from fantasy_helper.agent.guard import (
     visitor_ip,
     visitor_key,
     worst_case_usd,
+    worst_step_usd,
 )
 from fantasy_helper.agent.loop import Message
 from fantasy_helper.agent.routes import _events
@@ -29,6 +30,7 @@ from tests.fakes import ScriptedModel, answer, calls
 from tests.league_fixture import MY_TEAM, SEASON, league_snapshot
 
 NOW = datetime(2026, 11, 17, 12, 0, tzinfo=UTC)
+STEP = 0.015  # one model call's worst case with cap_settings: (10,000 × $1 + 1,000 × $5) / 1M
 
 
 def cap_settings(**kw):
@@ -68,6 +70,7 @@ def rows(Sessions):
 
 
 def test_a_turns_worst_case_is_every_step_at_the_ceilings():
+    assert worst_step_usd(cap_settings()) == pytest.approx(STEP)
     assert worst_case_usd(cap_settings()) == pytest.approx(0.03)
     assert worst_case_usd(cap_settings(agent_max_steps=6)) == pytest.approx(0.09)
 
@@ -102,7 +105,7 @@ def test_settled_turns_count_at_their_real_cost(Sessions):
     settings = cap_settings()
     for visitor in ("a", "b", "c"):
         row_id = reserve(Sessions, settings, visitor, NOW)
-        settle(Sessions, row_id, {"status": "ok", "known": True, "cost_usd": 0.001, "steps": 2})
+        settle(Sessions, row_id, {"status": "ok", "cost_usd": 0.001, "steps": 2}, STEP)
     reserve(Sessions, settings, "d", NOW)  # $0.003 spent, so there's room
     with Sessions() as s:
         assert spent_usd(s, NOW) == pytest.approx(0.003 + 0.03)
@@ -135,8 +138,8 @@ def test_known_usage_replaces_the_reservation(Sessions):
     row_id = reserve(Sessions, cap_settings(), "v", NOW)
     summary = {
         "status": "ok",
-        "known": True,
         "cost_usd": 0.0006,
+        "unreported_steps": 0,
         "steps": 2,
         "tools": ["rank_waivers"],
         "input_tokens": 5670,
@@ -145,18 +148,30 @@ def test_known_usage_replaces_the_reservation(Sessions):
         "reasoning_tokens": 0,
         "seconds": 16.6,
     }
-    settle(Sessions, row_id, summary)
+    settle(Sessions, row_id, summary, STEP)
     (row,) = rows(Sessions)
     assert (row.status, row.cost_usd, row.reserved_usd, row.usage_known) == ("ok", 0.0006, pytest.approx(0.03), True)
     assert row.tools == ["rank_waivers"] and row.input_tokens == 5670 and row.seconds == 16.6
 
 
-@pytest.mark.parametrize("summary", [{"status": "timeout", "known": False, "cost_usd": None}, {"status": "closed"}])
-def test_unknown_usage_keeps_the_reservation(Sessions, summary):
+@pytest.mark.parametrize(
+    ("summary", "cost"),
+    [
+        # A step cut off: what was reported, plus that step at its worst ($0.015 here).
+        ({"status": "closed", "cost_usd": 0.001, "unreported_steps": 1}, 0.016),
+        ({"status": "timeout", "cost_usd": 0.0, "unreported_steps": 1}, 0.015),
+        # Never more than the reservation.
+        ({"status": "closed", "cost_usd": 0.02, "unreported_steps": 2}, 0.03),
+        # No cost at all (prices missing, or no usage event): the reservation stands.
+        ({"status": "error", "cost_usd": None}, 0.03),
+        ({"status": "closed"}, 0.03),
+    ],
+)
+def test_unreported_steps_are_charged_at_their_worst(Sessions, summary, cost):
     row_id = reserve(Sessions, cap_settings(), "v", NOW)
-    settle(Sessions, row_id, summary)
+    settle(Sessions, row_id, summary, STEP)
     (row,) = rows(Sessions)
-    assert row.status == summary["status"] and row.cost_usd == pytest.approx(0.03) and not row.usage_known
+    assert row.status == summary["status"] and row.cost_usd == pytest.approx(cost) and not row.usage_known
 
 
 # --- Who's asking ----------------------------------------------------------------------------
@@ -242,7 +257,7 @@ def test_an_exhausted_budget_refuses_everyone(league):
     assert model.requests == []
 
 
-def test_a_turn_closed_by_the_visitor_keeps_its_reservation(league):
+def test_a_turn_closed_by_the_visitor_is_charged_for_the_step_it_was_in(league):
     settings = cap_settings()
     row_id = reserve(league, settings, "v", datetime.now(UTC))
     state = app(league, ScriptedModel(answer("one two three four"))).app.state
@@ -250,7 +265,7 @@ def test_a_turn_closed_by_the_visitor_keeps_its_reservation(league):
     assert '"start"' in next(stream) and '"text"' in next(stream)
     stream.close()  # what Starlette does when the visitor leaves
     (row,) = rows(league)
-    assert row.status == "closed" and not row.usage_known and row.cost_usd == pytest.approx(0.03)
+    assert row.status == "closed" and not row.usage_known and row.cost_usd == pytest.approx(0.015)
 
 
 def test_a_model_that_cant_be_made_costs_nothing(league):
@@ -261,3 +276,13 @@ def test_a_model_that_cant_be_made_costs_nothing(league):
     assert ask(client).status_code == 200
     (row,) = rows(league)
     assert row.status == "error" and row.cost_usd == 0.0
+
+
+def test_a_stream_closed_before_the_turn_starts_costs_nothing(league):
+    row_id = reserve(league, cap_settings(), "v", datetime.now(UTC))
+    state = app(league, ScriptedModel(answer("never"))).app.state
+    stream = _events(state, state.agent_model_factory, [Message("user", "hi")], row_id)
+    assert '"start"' in next(stream)
+    stream.close()  # the visitor left before anything else happened
+    (row,) = rows(league)
+    assert row.status == "closed" and row.cost_usd == 0.0

@@ -15,11 +15,20 @@ import logging
 from collections.abc import Callable, Iterator
 from typing import Any, Literal
 
+import anyio
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from fantasy_helper.agent.guard import Refused, header_shape, reserve, settle, visitor_ip, visitor_key
+from fantasy_helper.agent.guard import (
+    Refused,
+    header_shape,
+    reserve,
+    settle,
+    visitor_ip,
+    visitor_key,
+    worst_step_usd,
+)
 from fantasy_helper.agent.llm import ChatModel, OpenAIModel
 from fantasy_helper.agent.loop import Message, run_turn
 from fantasy_helper.api.app import Ctx
@@ -110,33 +119,66 @@ def agent(body: AgentIn, request: Request):
         return JSONResponse(status_code=exc.status, content={"detail": exc.message})
     messages = [Message(m.role, m.content) for m in recent(body.messages)]
     factory: Callable[[Settings], ChatModel] = state.agent_model_factory
-    return StreamingResponse(
+    return TurnResponse(
         _events(state, factory, messages, row_id), media_type="text/event-stream", headers=STREAM_HEADERS
     )
+
+
+class TurnResponse(StreamingResponse):
+    """A streamed turn that is closed when the response ends, however it ends. Starlette reads a
+    plain generator in a thread and, when the visitor disconnects, stops reading without closing it,
+    so the turn would never settle. Closing it runs the turn's own cleanup: the model response is
+    closed and the turn's usage recorded."""
+
+    def __init__(self, content: Iterator[str], **kwargs: Any):
+        super().__init__(content, **kwargs)
+        self._content = content
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            with anyio.CancelScope(shield=True):  # it may be finishing because it was cancelled
+                await anyio.to_thread.run_sync(_close, self._content)
+
+
+def _close(content: Iterator[str]) -> None:
+    close = getattr(content, "close", None)
+    if close is not None:
+        try:
+            close()
+        except Exception:
+            log.exception("agent stream didn't close cleanly")
 
 
 def _events(
     state: Any, factory: Callable[[Settings], ChatModel], messages: list[Message], row_id: int
 ) -> Iterator[str]:
-    yield sse({"type": "start"})  # at once, so the page knows it's working
+    # Once the turn has produced an event it settles itself (run_turn's on_finish). Before that
+    # nothing has been spent: the model is only called inside the turn, and the stream can only be
+    # closed at one of these yields. So a stream that ends sooner settles at no cost.
+    turn_started = False
+    status = "closed"
     try:
+        yield sse({"type": "start"})  # at once, so the page knows it's working
         model = factory(state.settings)
-    except Exception:
-        log.exception("agent model couldn't be made")
-        settle(state.sessionmaker, row_id, {"status": "error", "known": True, "cost_usd": 0.0})  # nothing was spent
-        yield sse({"type": "error", "message": "Something went wrong on our side."})
-        yield sse({"type": "done"})
-        return
-    try:
         with state.sessionmaker() as session:  # its own: the request's is gone once streaming starts
             c = Ctx(session, state.settings, state.cache)
-            turn = run_turn(c, model, messages, on_finish=lambda summary: settle(state.sessionmaker, row_id, summary))
+            step_usd = worst_step_usd(state.settings)
+            turn = run_turn(
+                c, model, messages, on_finish=lambda summary: settle(state.sessionmaker, row_id, summary, step_usd)
+            )
             try:
                 for event in turn:
+                    turn_started = True
                     yield sse(public(event))
             finally:
                 turn.close()  # settles the turn now, if the visitor left, while the session is open
     except Exception:
         log.exception("agent stream failed")
+        status = "error"
         yield sse({"type": "error", "message": "Something went wrong on our side."})
         yield sse({"type": "done"})
+    finally:
+        if not turn_started:
+            settle(state.sessionmaker, row_id, {"status": status, "cost_usd": 0.0}, 0.0)
