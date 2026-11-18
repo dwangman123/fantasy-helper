@@ -29,5 +29,7 @@ FROM base AS api
 COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:1.1.0 /lambda-adapter /opt/extensions/lambda-adapter
 ENV AWS_LWA_PORT=8080 \
     AWS_LWA_READINESS_CHECK_PATH=/api/health
-ENTRYPOINT ["python3", "-m", "uvicorn", "fantasy_helper.api.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8080"]
+# No access log: uvicorn takes the client address from X-Forwarded-For (the adapter connects
+# from 127.0.0.1, which it trusts), so each request line would hold the visitor's IP address.
+ENTRYPOINT ["python3", "-m", "uvicorn", "fantasy_helper.api.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8080", "--no-access-log"]
 CMD []
