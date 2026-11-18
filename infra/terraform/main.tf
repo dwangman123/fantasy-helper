@@ -61,6 +61,9 @@ locals {
   # streamed or both buffered. One variable sets the two, so they can't be applied apart.
   api_environment = {
     AWS_LWA_INVOKE_MODE = var.api_streaming ? "response_stream" : "buffered"
+    # The chat's spending cap (backend/src/fantasy_helper/agent/guard.py).
+    FH_AGENT_DAILY_BUDGET_USD       = tostring(var.agent_daily_budget_usd)
+    FH_AGENT_VISITOR_DAILY_MESSAGES = tostring(var.agent_visitor_daily_messages)
   }
 }
 

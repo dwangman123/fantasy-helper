@@ -61,7 +61,10 @@ def run_turn(
     model: ChatModel,
     messages: list[Message],
     clock: Callable[[], float] = time.monotonic,
+    on_finish: Callable[[dict[str, Any]], None] | None = None,
 ) -> Iterator[dict[str, Any]]:
+    """`on_finish` gets the turn's usage event however the turn ends, a closed one too (it's
+    where the spending cap settles the turn); an error in it is logged, not raised."""
     settings = c.settings
     start = clock()
     deadline = start + settings.agent_deadline_seconds
@@ -131,6 +134,11 @@ def run_turn(
         if turn.streaming:  # stopped inside a model response: billed, but its usage never came
             turn.usage.known = False
         summary = _summary(turn, model.name, cost_usd(turn.usage, settings), clock() - start)
+        if on_finish is not None:
+            try:
+                on_finish(summary)
+            except Exception:
+                log.exception("agent turn's on_finish failed")
     yield summary
     yield {"type": "done"}
 

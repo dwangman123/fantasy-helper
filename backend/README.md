@@ -70,6 +70,7 @@ When deployed, the [`Dockerfile`](Dockerfile) builds two images from one base. T
 | [`agent/prompt.py`](src/fantasy_helper/agent/prompt.py) | The agent's instructions and a card of the day's league facts |
 | [`agent/loop.py`](src/fantasy_helper/agent/loop.py) | One chat turn: model calls, tool calls, limits, usage and cost, as a stream of events |
 | [`agent/routes.py`](src/fantasy_helper/agent/routes.py) | `POST /api/agent`: a turn as server-sent events |
+| [`agent/guard.py`](src/fantasy_helper/agent/guard.py) | The chat's spending cap: each turn reserves its worst-case cost, then settles to its real one |
 | [`agent/resolve.py`](src/fantasy_helper/agent/resolve.py) | Team and player names the model writes → ids, or the candidates when a name is unclear |
 | [`aws.py`](src/fantasy_helper/aws.py) | Lambda entry point for the scheduled ingest |
 
@@ -114,7 +115,7 @@ Matchup, lineup, waiver and trade views are from one team's side (`me` / `opp`, 
 | GET | `/api/trades` | `team_id` | Deals found that help both teams | Trades |
 | GET | `/api/waivers` | `team_id`, `same_day` | Category board, stream and hold rankings | Waivers |
 | POST | `/api/refresh` | | The ingest run | Refresh button |
-| POST | `/api/agent` | | One chat turn as server-sent events; body `{"messages": [{"role": "user" or "assistant", "content": "..."}]}`, ending with a question. 503 until configured | Chat (coming) |
+| POST | `/api/agent` | | One chat turn as server-sent events; body `{"messages": [{"role": "user" or "assistant", "content": "..."}]}`, ending with a question. 503 until configured, 429 over the spending cap | Chat (coming) |
 
 `partner_id`, `give` and `get` are required on `/api/trade`. All other query params are optional.
 
@@ -166,6 +167,10 @@ The seven console scripts declared in [`pyproject.toml`](pyproject.toml); run ea
 | `FH_AGENT_MAX_OUTPUT_TOKENS` | `8000` | Per model call, reasoning included |
 | `FH_AGENT_MAX_STEPS` | `6` | Model calls per turn; the last can't call tools |
 | `FH_AGENT_DEADLINE_SECONDS` | `75` | For a whole turn; below the API function's 90 s timeout |
+| `FH_AGENT_DAILY_BUDGET_USD` | `1.0` | OpenAI spending over any 24 hours; turns in progress count at their worst case |
+| `FH_AGENT_VISITOR_DAILY_MESSAGES` | `30` | Messages one visitor (by IP address) can send in 24 hours |
+| `FH_AGENT_RESERVE_INPUT_TOKENS` | `40000` | Input tokens per model call assumed when reserving a turn's worst case |
+| `FH_AGENT_VISITOR_SALT` | the OpenAI key | Salts the hash of each visitor's IP address |
 | `FH_SECRET_ID` | unset | Read the settings above from this AWS secret |
 
 ## Database
@@ -180,6 +185,7 @@ The schema is in [`db/models.py`](src/fantasy_helper/db/models.py). Each ingest 
   - `moves`: adds and drops.
   - `matchup_predictions`: one row per matchup per run, append-only.
   - `ingest_runs`: one row per ingest.
+  - `agent_usage`: one row per chat turn (tokens, cost, tools, a salted hash of the visitor's IP; never the text), for the spending cap.
 
 Migrations are Alembic. [`alembic/env.py`](alembic/env.py) takes the URL from `Settings`, so `FH_DATABASE_URL` picks the target:
 

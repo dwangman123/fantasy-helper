@@ -298,3 +298,28 @@ class IngestRun(Base):
     counts: Mapped[dict | None] = mapped_column(JSON)
     warnings: Mapped[list | None] = mapped_column(JSON)
     error: Mapped[str | None] = mapped_column(Text)
+
+
+class AgentUsage(Base):
+    """One chat turn's tokens and cost, for the spending cap; never the conversation's text.
+    Inserted as `running` with the turn's worst-case cost reserved before it starts, then
+    settled when it ends, so a turn that never reports back (killed at the Lambda timeout, say)
+    still counts at its reservation."""
+
+    __tablename__ = "agent_usage"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    visitor: Mapped[str] = mapped_column(String(64), index=True)  # salted hash of the IP address
+    model: Mapped[str] = mapped_column(String(100))
+    status: Mapped[str] = mapped_column(String(20))  # running, then ok / incomplete / timeout / error / closed
+    reserved_usd: Mapped[float] = mapped_column(Float)
+    cost_usd: Mapped[float] = mapped_column(Float)  # what the cap counts: the reservation until settled
+    usage_known: Mapped[bool] = mapped_column(Boolean, default=False)
+    steps: Mapped[int] = mapped_column(Integer, default=0)
+    tools: Mapped[list | None] = mapped_column(JSON)
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cached_input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    reasoning_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    seconds: Mapped[float | None] = mapped_column(Float)
