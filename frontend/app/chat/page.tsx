@@ -3,8 +3,10 @@
 import { type FormEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
 
 import { Markdown } from "@/components/Markdown";
-import { ApiError } from "@/lib/api";
+import { TeamSelect } from "@/components/TeamSelect";
+import { ApiError, useLeague } from "@/lib/api";
 import { type AgentEvent, type ChatMessage, MAX_QUESTION_CHARS, askAgent } from "@/lib/agent";
+import { usePickedTeam } from "@/lib/defaultTeam";
 
 // One step the assistant took: a tool it ran, as it runs.
 type Step = { id: string; name: string; state: "running" | "done" | "failed" };
@@ -57,6 +59,27 @@ function save(turns: Turn[]) {
   }
 }
 
+// The team chosen in the chat, when it isn't the default, kept with the conversation so a reload
+// doesn't change whose team "my team" is partway through.
+const TEAM_KEY = "fh-chat-team";
+
+function loadTeam(): number | undefined {
+  try {
+    const id = Number(sessionStorage.getItem(TEAM_KEY));
+    return Number.isInteger(id) && id > 0 ? id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function saveTeam(id: number) {
+  try {
+    sessionStorage.setItem(TEAM_KEY, String(id));
+  } catch {
+    // blocked: the choice lasts until a reload
+  }
+}
+
 // What the model sees of earlier turns: their text, without failed or empty answers.
 function history(turns: Turn[]): ChatMessage[] {
   return turns.filter((t) => t.content.trim() && !(t.role === "assistant" && t.error)).map(({ role, content }) => ({ role, content }));
@@ -67,11 +90,26 @@ export default function ChatPage() {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false); // read from storage after the first render, never during
+  const [chosenTeam, setChosenTeam] = useState<number>();
   const abort = useRef<AbortController | null>(null);
   const end = useRef<HTMLDivElement>(null);
 
+  // "My team" in a question: the team chosen here, else the one picked on the first visit, else
+  // the site owner's. Undefined until the league loads (or if it can't): the server then uses the
+  // site owner's.
+  const league = useLeague();
+  const teams = league.data?.teams;
+  const picked = usePickedTeam(teams);
+  const teamId =
+    chosenTeam !== undefined && teams?.some((t) => t.team_id === chosenTeam)
+      ? chosenTeam
+      : picked === undefined
+        ? undefined
+        : (picked ?? league.data?.my_team_id);
+
   useEffect(() => {
     setTurns(load());
+    setChosenTeam(loadTeam());
     setLoaded(true);
   }, []);
   useEffect(() => {
@@ -111,7 +149,7 @@ export default function ChatPage() {
     const controller = new AbortController();
     abort.current = controller;
     try {
-      await askAgent(messages, onEvent, controller.signal);
+      await askAgent(messages, teamId, onEvent, controller.signal);
     } catch (err) {
       const message =
         err instanceof DOMException && err.name === "AbortError"
@@ -145,6 +183,13 @@ export default function ChatPage() {
     save([]);
   }
 
+  // Another team starts a new chat: earlier answers call the old team "you".
+  function changeTeam(id: number) {
+    setChosenTeam(id);
+    saveTeam(id);
+    startOver();
+  }
+
   return (
     <div className="stack chat">
       <div className="row" style={{ justifyContent: "space-between" }}>
@@ -152,15 +197,18 @@ export default function ChatPage() {
           <h1>Chat</h1>
           <div className="sub">
             Ask about matchups, pickups, teams and trades. Every number comes from the app&apos;s own analytics, as on
-            the other pages. &ldquo;My team&rdquo; means the site owner&apos;s; name a team by its owner to ask about
-            another.
+            the other pages. &ldquo;My team&rdquo; in a question means the team picked here; name a team by its owner
+            to ask about another. Picking another team starts a new chat.
           </div>
         </div>
-        {turns.length > 0 && (
-          <button type="button" onClick={startOver}>
-            New chat
-          </button>
-        )}
+        <div className="row">
+          {teams && teamId !== undefined && <TeamSelect teams={teams} value={teamId} onChange={changeTeam} />}
+          {turns.length > 0 && (
+            <button type="button" onClick={startOver}>
+              New chat
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="chat-log" role="log" aria-label="Conversation">

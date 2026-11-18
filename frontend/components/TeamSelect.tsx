@@ -3,18 +3,21 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import type { Team } from "@/lib/api";
+import { usePickedTeam } from "@/lib/defaultTeam";
 
 // Teams in picker order: by owner.
 export const byOwner = (teams: Team[]) => [...teams].sort((a, b) => a.owner.localeCompare(b.owner));
 
 // The team being viewed lives in the URL (?team=7). Anyone in the league may be looking, so
-// there's no "my team": without the param it's the first team by owner.
+// there's no "my team": without the param it's the team picked on the first visit, or else the
+// first team by owner. Choosing another here doesn't change that pick.
 export function useTeamParam(teams: Team[] | undefined): [number | undefined, (id: number) => void] {
   const params = useSearchParams();
   const router = useRouter();
   const path = usePathname();
+  const picked = usePickedTeam(teams);
   const fromUrl = Number(params.get("team"));
-  const fallback = teams?.length ? byOwner(teams)[0].team_id : undefined;
+  const fallback = teams?.length && picked !== undefined ? (picked ?? byOwner(teams)[0].team_id) : undefined;
   const valid = Number.isInteger(fromUrl) && fromUrl > 0 && (!teams || teams.some((t) => t.team_id === fromUrl));
   const teamId = valid ? fromUrl : fallback;
   const setTeam = (id: number) => {

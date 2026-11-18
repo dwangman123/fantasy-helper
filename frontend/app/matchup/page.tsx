@@ -2,14 +2,15 @@
 
 import { Suspense } from "react";
 
-import { CategoryH2H } from "@/components/CategoryH2H";
+import { CategoryH2H, currentScore } from "@/components/CategoryH2H";
 import { DayLineup } from "@/components/DayLineup";
 import { MatchupStrip, WeekStepper, sides, useMatchupParam, useWeekParam } from "@/components/MatchupPicker";
 import { OddsBar, OddsLegend } from "@/components/OddsBar";
 import { OddsHistory } from "@/components/OddsHistory";
 import { ErrorNotice, Loading } from "@/components/Status";
 import { Tile } from "@/components/Tile";
-import { type MatchupDetail, type Team, useLeague, useMatchup, useMatchups } from "@/lib/api";
+import { type MatchupDetail, type MatchupSummary, type Team, useLeague, useMatchup, useMatchups } from "@/lib/api";
+import { usePickedTeam } from "@/lib/defaultTeam";
 import { dateTime, pct } from "@/lib/format";
 
 export default function MatchupPage() {
@@ -27,15 +28,16 @@ function Matchup() {
   // An earlier week to show; undefined while it's the current one.
   const past = week !== current ? week : undefined;
   const scoreboard = useMatchups(past, league.data !== undefined);
-  const opening = scoreboard.data?.[0];
+  const picked = usePickedTeam(league.data?.teams);
+  const rows = scoreboard.data && picked !== undefined ? pickedFirst(scoreboard.data, picked) : undefined;
+  const opening = rows?.[0];
   const [matchupId, setMatchup] = useMatchupParam(opening?.espn_id);
-  const row = scoreboard.data?.find((r) => r.espn_id === matchupId) ?? opening;
+  const row = rows?.find((r) => r.espn_id === matchupId) ?? opening;
   const [leftId, rightId] = row ? sides(row) : [undefined, undefined];
   const detail = useMatchup(leftId, past);
   const error = league.error ?? scoreboard.error ?? detail.error;
   if (error) return <ErrorNotice error={error} />;
-  if (!league.data || !scoreboard.data || !row || !detail.data || rightId === undefined)
-    return <Loading what="matchup" />;
+  if (!league.data || !rows || !row || !detail.data || rightId === undefined) return <Loading what="matchup" />;
 
   const d = detail.data;
   const teams = Object.fromEntries(league.data.teams.map((t) => [t.team_id, t]));
@@ -51,7 +53,7 @@ function Matchup() {
           <WeekStepper weeks={league.data.weeks} value={week ?? d.matchup_period} onChange={setWeek} />
         </div>
         <MatchupStrip
-          rows={scoreboard.data}
+          rows={rows}
           teams={teams}
           categories={league.data.categories.length}
           value={row.espn_id}
@@ -67,8 +69,8 @@ function Matchup() {
             <h2>Categories</h2>
             <div className="sub">
               {d.final
-                ? "ESPN's final totals"
-                : "Current is each total so far, including today's games. Projected is where it should end the week."}
+                ? "ESPN's final totals, the winner's shaded"
+                : "Current is each total so far, including today's games, shaded for the side ahead now. Projected is where it should end the week, bold for the side ahead then."}
             </div>
           </div>
           <OddsLegend labels={[`${left.owner} wins`, "Tie", `${right.owner} wins`]} />
@@ -89,10 +91,18 @@ function Matchup() {
   );
 }
 
+// The week's matchups with the one of the team picked on the first visit first, so the page opens
+// on it; the rest in ESPN's order. Home stays on the left: the pick isn't marked as anyone's.
+function pickedFirst(rows: MatchupSummary[], teamId: number | null): MatchupSummary[] {
+  const i = rows.findIndex((r) => r.home_team_id === teamId || r.away_team_id === teamId);
+  return i <= 0 ? rows : [rows[i], ...rows.slice(0, i), ...rows.slice(i + 1)];
+}
+
 type HeroProps = { d: MatchupDetail; left: Team; right: Team };
 
 // The current week: each side's chance to win, the tie between them.
 function Odds({ d, left, right }: HeroProps) {
+  const now = currentScore(d.categories);
   return (
     <>
       <div className="h2h-hero">
@@ -104,12 +114,17 @@ function Odds({ d, left, right }: HeroProps) {
         <Side team={right} value={pct(d.p_loss)} note={record(right)} color="var(--loss)" align="right" />
       </div>
       <div className="tiles">
+        <Tile label="Current score" value={`${now.me}-${now.opp}-${now.ties}`} note="if the week ended now" />
+        <Tile
+          label="Most likely score"
+          value={`${d.most_likely.me}-${d.most_likely.opp}-${d.most_likely.ties}`}
+          note="when it ends"
+        />
         <Tile
           label="Expected categories"
           value={`${d.expected.me.toFixed(1)} – ${d.expected.opp.toFixed(1)}`}
           note={`${d.expected.ties.toFixed(1)} tied`}
         />
-        <Tile label="Most likely score" value={`${d.most_likely.me}-${d.most_likely.opp}-${d.most_likely.ties}`} />
       </div>
     </>
   );

@@ -18,7 +18,7 @@ Fantasy Helper pulls the whole league from ESPN every hour, or on demand with Re
 
 ## What it does
 
-The league scores **FG%, FT%, 3PM, REB, AST, STL, BLK, TO and PTS** head to head, most categories wins, with ties allowed. Each team starts 10 players a day. The app has six pages. Anyone in the league can look at any team, so no view assumes whose it is. The sixth is a chat assistant that answers questions in plain English with the same numbers.
+The league scores **FG%, FT%, 3PM, REB, AST, STL, BLK, TO and PTS** head to head, most categories wins, with ties allowed. Each team starts 10 players a day. The app has six pages. Anyone in the league can look at any team, so no view marks a team as anyone's. On a first visit the app asks which team is yours (or you can skip), and each page then opens on that team, which can still be switched. The sixth is a chat assistant that answers questions in plain English with the same numbers.
 
 ### Matchup: who wins this week, and why
 
@@ -71,7 +71,7 @@ Any deal of up to three players a side can also be scored by hand.
 
 ### Chat: ask about the league in plain English
 
-Ask something like *"Who should I pick up to win steals this week?"* and an assistant answers with the app's own numbers. Its tools are the calculations behind the other pages: matchup odds, team profiles, the category heatmap, power rankings, waiver and trade rankings, and player lookups. A line shows each tool as it runs, and the answer streams in as it's written. The model, from OpenAI, only picks the tools and explains what they return; every number comes from a tool. "My team" means the site owner's, and any other team can be named by its owner.
+Ask something like *"Who should I pick up to win steals this week?"* and an assistant answers with the app's own numbers. Its tools are the calculations behind the other pages: matchup odds, team profiles, the category heatmap, power rankings, waiver and trade rankings, and player lookups. A line shows each tool as it runs, and the answer streams in as it's written. The model, from OpenAI, only picks the tools and explains what they return; every number comes from a tool. "My team" means the team picked at the top of the chat, which starts on the one picked on the first visit (or the site owner's), and any other team can be named by its owner.
 
 The conversation stays in the browser tab and isn't stored. The server keeps only each answer's tokens, cost and tools, for a spending cap: $1 a day across everyone, and 30 questions a day per visitor. A question costs well under a cent.
 

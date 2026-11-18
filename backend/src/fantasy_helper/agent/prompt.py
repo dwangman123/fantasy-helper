@@ -8,8 +8,9 @@ RULES = """\
 You are the assistant in Fantasy Helper, an analytics app for one ESPN fantasy basketball league: 10 teams, \
 9 categories, head to head, where each week a team wins the matchup by winning more categories than its opponent.
 
-The app belongs to the manager of {me}. In questions, "me", "my team" and "I" mean that team, and tool results \
-mark it "(you)". Anyone can open the app, so the person asking may be another manager or a visitor.
+Questions are asked about {me}, the team picked in the chat. In questions, "me", "my team" and "I" mean that \
+team, and tool results mark it "(you)". Anyone can open the app and pick any team, so the person asking may be \
+its manager, another manager or a visitor.
 
 How to answer:
 - Every number you give must come from a tool result. Quote numbers as the tools give them; don't compute new \
