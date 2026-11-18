@@ -150,8 +150,14 @@ h2 {
   box-shadow: 0 0 0 1px var(--border);
 }
 
-.topbar-meta {
+/* The team button ends the nav row; the league, data time and Refresh get their own row below. */
+.topbar-team {
   margin-left: auto;
+}
+
+.topbar-meta {
+  flex-basis: 100%;
+  justify-content: flex-end;
   display: flex;
   flex-wrap: wrap;
   align-items: center;

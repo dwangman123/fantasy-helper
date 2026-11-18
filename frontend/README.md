@@ -31,9 +31,9 @@ Install, dev server and build are in [docs/development.md](../docs/development.m
 
 ## Pages
 
-The six pages are client components. [`app/layout.tsx`](app/layout.tsx) wraps them all in the query provider and the [`TopBar`](components/TopBar.tsx). The top bar has the nav links, the default team, the "data from" time and the Refresh button. When the last ingest failed or had warnings, it also shows them in a banner. `/` redirects to `/matchup`.
+The six pages are client components. [`app/layout.tsx`](app/layout.tsx) wraps them all in the query provider and the [`TopBar`](components/TopBar.tsx). The top bar has the nav links and the My team button on one row, and the league name, "data from" time and Refresh button on the row below. When the last ingest failed or had warnings, it also shows them in a banner. `/` redirects to `/matchup`.
 
-On a first visit, [`TeamChooser`](components/TeamChooser.tsx) asks which team is yours. The pick (or a skip) is kept in `localStorage` by [`lib/defaultTeam.ts`](lib/defaultTeam.ts), and the top bar button opens the dialog again to change it. It only decides which team a page opens on: Team, Waivers and Trades open on it, Matchup opens on its matchup (listed first), and the chat starts on it. Nothing marks it as "mine", and League, which shows every team, is unchanged.
+On a first visit, [`TeamChooser`](components/TeamChooser.tsx) asks which team is yours. The pick (or a skip) is kept in `localStorage` by [`lib/defaultTeam.ts`](lib/defaultTeam.ts), and the top bar's My team button opens the dialog again to change it. It only decides which team a page opens on: Team, Waivers and Trades open on it, Matchup opens on its matchup (listed first), and the chat starts on it. Nothing marks it as "mine", and League, which shows every team, is unchanged.
 
 | Route | Shows | Hooks | Main components |
 |---|---|---|---|
@@ -61,7 +61,7 @@ The four pages that read these params (Matchup, Team, Waivers, Trades) render th
 
 | Component | Renders |
 |---|---|
-| [`TopBar`](components/TopBar.tsx) | Nav, default team, data time, Refresh button and the ingest-warnings banner |
+| [`TopBar`](components/TopBar.tsx) | Nav, the My team button, data time, Refresh button and the ingest-warnings banner |
 | [`TeamChooser`](components/TeamChooser.tsx) | The first-visit "which team is yours?" dialog, and the top bar button that reopens it |
 | [`RefreshButton`](components/RefreshButton.tsx) | Runs `useRefresh` and shows its error |
 | [`TeamSelect`](components/TeamSelect.tsx) | Team picker, plus `useTeamParam` |
