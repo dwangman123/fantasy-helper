@@ -4,10 +4,29 @@ import { pct, stat } from "@/lib/format";
 
 type Props = { rows: CategoryOdds[]; left: Team; right: Team; final: boolean };
 
+type Side = "left" | "right" | null;
+
+// The side ahead on two totals (fewer is better for reversed categories); null when they're level
+// or one is missing (a percentage before its first attempt).
+function ahead(l: number | null, r: number | null, reverse: boolean): Side {
+  if (l === null || r === null || l === r) return null;
+  return (reverse ? l < r : l > r) ? "left" : "right";
+}
+
+// The score if the week ended now: the categories each side leads on its totals so far, the
+// left side first, then the right, then ties.
+export function currentScore(rows: CategoryOdds[]): { me: number; opp: number; ties: number } {
+  const leads = rows.map((c) => ahead(c.now_me, c.now_opp, c.reverse));
+  const me = leads.filter((x) => x === "left").length;
+  const opp = leads.filter((x) => x === "right").length;
+  return { me, opp, ties: rows.length - me - opp };
+}
+
 // Each category head to head: the left team's totals so far and projected on its side, the
 // right team's mirrored on the other, and the win / tie / loss odds between them, with each
 // side's chance to win either side of its status. A finished week shows ESPN's final totals
-// and who won each category.
+// and who won each category. Real totals (so far, or final) are shaded in the color of the side
+// leading them; a projection only goes bold, so what has happened reads apart from what's expected.
 export function CategoryH2H({ rows, left, right, final }: Props) {
   return (
     <div className="table-wrap">
@@ -34,13 +53,23 @@ export function CategoryH2H({ rows, left, right, final }: Props) {
         </thead>
         <tbody>
           {rows.map((c) => {
-            // The side projected to finish ahead (fewer is better for reversed categories).
-            const leftAhead = c.reverse ? c.proj_me < c.proj_opp : c.proj_me > c.proj_opp;
-            const rightAhead = c.reverse ? c.proj_opp < c.proj_me : c.proj_opp > c.proj_me;
+            const now = ahead(c.now_me, c.now_opp, c.reverse);
+            const projected = ahead(c.proj_me, c.proj_opp, c.reverse);
+            const won: Side = c.result === "win" ? "left" : c.result === "loss" ? "right" : null;
             return (
               <tr key={c.key}>
-                {!final && <td className="l now">{stat(c.now_me, c.is_percentage)}</td>}
-                <td className={`l final${leftAhead ? " lead" : ""}`}>{value(c.proj_me, c.proj_opp, c.is_percentage)}</td>
+                {!final && (
+                  <td className="l now">
+                    <Actual x={c.now_me} other={c.now_opp} isPercentage={c.is_percentage} side="left" lead={now} />
+                  </td>
+                )}
+                <td className={`l final${projected === "left" ? " lead" : ""}`}>
+                  {final ? (
+                    <Actual x={c.proj_me} other={c.proj_opp} isPercentage={c.is_percentage} side="left" lead={won} />
+                  ) : (
+                    value(c.proj_me, c.proj_opp, c.is_percentage)
+                  )}
+                </td>
                 <td className="mid">
                   <div className="h2h-cat">
                     <strong>{c.key}</strong>
@@ -53,8 +82,18 @@ export function CategoryH2H({ rows, left, right, final }: Props) {
                     <span>{final ? "" : pct(c.p_loss)}</span>
                   </div>
                 </td>
-                <td className={`r final${rightAhead ? " lead" : ""}`}>{value(c.proj_opp, c.proj_me, c.is_percentage)}</td>
-                {!final && <td className="r now">{stat(c.now_opp, c.is_percentage)}</td>}
+                <td className={`r final${projected === "right" ? " lead" : ""}`}>
+                  {final ? (
+                    <Actual x={c.proj_opp} other={c.proj_me} isPercentage={c.is_percentage} side="right" lead={won} />
+                  ) : (
+                    value(c.proj_opp, c.proj_me, c.is_percentage)
+                  )}
+                </td>
+                {!final && (
+                  <td className="r now">
+                    <Actual x={c.now_opp} other={c.now_me} isPercentage={c.is_percentage} side="right" lead={now} />
+                  </td>
+                )}
               </tr>
             );
           })}
@@ -68,6 +107,19 @@ export function CategoryH2H({ rows, left, right, final }: Props) {
 function value(x: number, other: number, isPercentage: boolean): string {
   if (isPercentage && x !== other && stat(x, true) === stat(other, true)) return x.toFixed(4).replace(/^0/, "");
   return stat(x, isPercentage);
+}
+
+type ActualProps = { x: number | null; other: number | null; isPercentage: boolean; side: "left" | "right"; lead: Side };
+
+// A real total, shaded in its side's color when that side leads the category.
+function Actual({ x, other, isPercentage, side, lead }: ActualProps) {
+  const leads = lead === side;
+  return (
+    <span className={`actual${leads ? ` lead-${side}` : ""}`}>
+      {x === null ? stat(null, isPercentage) : value(x, other ?? x, isPercentage)}
+      {leads && <span className="sr-only"> (ahead)</span>}
+    </span>
+  );
 }
 
 // A finished week's result; otherwise locked for one side (over 90% to win it) or a swing

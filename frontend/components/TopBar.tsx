@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { RefreshButton } from "@/components/RefreshButton";
+import { TeamChooser } from "@/components/TeamChooser";
 import { useLeague } from "@/lib/api";
 import { dateTime } from "@/lib/format";
 
@@ -35,6 +36,7 @@ export function TopBar() {
         </nav>
         {league && (
           <div className="topbar-meta">
+            <TeamChooser teams={league.teams} />
             <span>
               {league.name} · data from {dateTime(league.data_as_of)}
             </span>

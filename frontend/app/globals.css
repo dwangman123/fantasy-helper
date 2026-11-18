@@ -14,6 +14,7 @@
   --loss: #e34948;
   --tie: #c3c2b7;
   --win-wash: #cde2fb;
+  --loss-wash: #fbd8d7;
   --warning: #fab219;
   --critical: #d03b3b;
   --good-text: #006300;
@@ -35,6 +36,7 @@
     --loss: #e66767;
     --tie: #52514e;
     --win-wash: #104281;
+    --loss-wash: #7d2423;
     --good-text: #0ca30c;
   }
 }
@@ -53,11 +55,22 @@
   --loss: #e66767;
   --tie: #52514e;
   --win-wash: #104281;
+  --loss-wash: #7d2423;
   --good-text: #0ca30c;
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* Read by screen readers, not shown. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 html,
@@ -153,6 +166,74 @@ button.refresh {
   gap: 6px;
   font-size: 13px;
   padding: 4px 10px;
+  cursor: pointer;
+}
+
+button.team-pick {
+  font-size: 13px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+/* The first-visit "which team is yours?" dialog. */
+dialog.team-chooser {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
+}
+
+dialog.team-chooser::backdrop {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+dialog.team-chooser > .sub {
+  margin: 6px 0 0;
+}
+
+.team-chooser-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(130px, 100%), 1fr));
+  gap: 8px;
+  margin: 16px 0;
+}
+
+.team-chooser-grid button {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.team-chooser-grid button:hover {
+  border-color: var(--axis);
+}
+
+.team-chooser-grid button[aria-pressed="true"] {
+  border-color: var(--win);
+  box-shadow: inset 0 0 0 1px var(--win);
+}
+
+.team-chooser-grid .sub {
+  overflow-wrap: anywhere;
+}
+
+.team-chooser-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.team-chooser-foot button {
   cursor: pointer;
 }
 
@@ -559,12 +640,30 @@ tr.selected td {
   color: var(--ink-2);
 }
 
-.h2h td.final {
-  font-size: 16px;
-}
-
 .h2h td.lead {
   font-weight: 600;
+}
+
+/* A real total (so far, or final): shaded in the color of the side that leads it, so the outer
+   columns read as the score right now. Unshaded ones keep the same padding to stay aligned. */
+.h2h .actual {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+
+.h2h .actual.lead-left,
+.h2h .actual.lead-right {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.h2h .actual.lead-left {
+  background: var(--win-wash);
+}
+
+.h2h .actual.lead-right {
+  background: var(--loss-wash);
 }
 
 .h2h-cat {

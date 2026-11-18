@@ -261,7 +261,7 @@ def test_a_turn_closed_by_the_visitor_is_charged_for_the_step_it_was_in(league):
     settings = cap_settings()
     row_id = reserve(league, settings, "v", datetime.now(UTC))
     state = app(league, ScriptedModel(answer("one two three four"))).app.state
-    stream = _events(state, state.agent_model_factory, [Message("user", "hi")], row_id)
+    stream = _events(state, state.settings, state.agent_model_factory, [Message("user", "hi")], row_id)
     assert '"start"' in next(stream) and '"text"' in next(stream)
     stream.close()  # what Starlette does when the visitor leaves
     (row,) = rows(league)
@@ -281,7 +281,7 @@ def test_a_model_that_cant_be_made_costs_nothing(league):
 def test_a_stream_closed_before_the_turn_starts_costs_nothing(league):
     row_id = reserve(league, cap_settings(), "v", datetime.now(UTC))
     state = app(league, ScriptedModel(answer("never"))).app.state
-    stream = _events(state, state.agent_model_factory, [Message("user", "hi")], row_id)
+    stream = _events(state, state.settings, state.agent_model_factory, [Message("user", "hi")], row_id)
     assert '"start"' in next(stream)
     stream.close()  # the visitor left before anything else happened
     (row,) = rows(league)

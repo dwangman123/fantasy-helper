@@ -26,6 +26,7 @@ export type WeekSpan = { matchup_period: number; start: string; end: string };
 export type League = {
   season: number;
   name: string;
+  my_team_id: number; // the site owner's team: the chat's when no team is picked
   today: string;
   scoring_period: number;
   week: { matchup_period: number; start: string; end: string; days: number; days_left: number };

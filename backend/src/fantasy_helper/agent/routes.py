@@ -4,10 +4,11 @@ The browser keeps the conversation and sends it whole each turn (just the text: 
 calls its tools again rather than seeing earlier results). Only the latest turns go to the model
 (`recent`), so a long chat costs no more per turn than a short one. Every HTTP status is decided before
 the stream starts, since a streamed response can't change it later: 422 for a malformed body,
-400 for a conversation that doesn't end with a question, 503 when the agent isn't configured,
-404 when no league is stored, 429 over the spending cap (guard.py), which reserves the turn's
-worst-case cost here and settles it when the turn ends. Once streaming, problems arrive as an `error` event, and `done`
-always comes last. See loop.py for the events.
+400 for a conversation that doesn't end with a question or a `team_id` not in the league, 503
+when the agent isn't configured, 404 when no league is stored, 429 over the spending cap
+(guard.py), which reserves the turn's worst-case cost here and settles it when the turn ends.
+Once streaming, problems arrive as an `error` event, and `done` always comes last. See loop.py
+for the events.
 """
 
 import json
@@ -33,6 +34,7 @@ from fantasy_helper.agent.llm import ChatModel, OpenAIModel
 from fantasy_helper.agent.loop import Message, run_turn
 from fantasy_helper.api.app import Ctx
 from fantasy_helper.config import Settings
+from fantasy_helper.db import queries as q
 
 log = logging.getLogger("fantasy_helper.agent")
 
@@ -64,6 +66,9 @@ class AgentIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     messages: list[MessageIn] = Field(min_length=1, max_length=MAX_MESSAGES_IN)
+    # The team the questions are about ("me", "my team"), picked in the page; the site owner's
+    # (settings.my_team_id) when it's not sent.
+    team_id: int | None = Field(default=None, gt=0)
 
 
 def recent(messages: list[MessageIn]) -> list[MessageIn]:
@@ -111,6 +116,11 @@ def agent(body: AgentIn, request: Request):
         return JSONResponse(status_code=400, content={"detail": "The conversation must end with a question."})
     with state.sessionmaker() as session:
         Ctx(session, settings, state.cache)  # raises LookupError (404) with no league stored
+        if body.team_id is not None:
+            if body.team_id not in {t.team_id for t in q.load_teams(session, settings.season)}:
+                return JSONResponse(status_code=400, content={"detail": "That team isn't in the league."})
+            # The turn's "me": the prompt, tool labels and team lookups all read my_team_id.
+            settings = settings.model_copy(update={"my_team_id": body.team_id})
     ip = visitor_ip(request.headers, request.client.host if request.client else None)
     salt = settings.agent_visitor_salt or settings.openai_api_key or ""
     try:
@@ -120,7 +130,7 @@ def agent(body: AgentIn, request: Request):
     messages = [Message(m.role, m.content) for m in recent(body.messages)]
     factory: Callable[[Settings], ChatModel] = state.agent_model_factory
     return TurnResponse(
-        _events(state, factory, messages, row_id), media_type="text/event-stream", headers=STREAM_HEADERS
+        _events(state, settings, factory, messages, row_id), media_type="text/event-stream", headers=STREAM_HEADERS
     )
 
 
@@ -152,7 +162,7 @@ def _close(content: Iterator[str]) -> None:
 
 
 def _events(
-    state: Any, factory: Callable[[Settings], ChatModel], messages: list[Message], row_id: int
+    state: Any, settings: Settings, factory: Callable[[Settings], ChatModel], messages: list[Message], row_id: int
 ) -> Iterator[str]:
     # Once the turn has produced an event it settles itself (run_turn's on_finish). Before that
     # nothing has been spent: the model is only called inside the turn, and the stream can only be
@@ -161,10 +171,10 @@ def _events(
     status = "closed"
     try:
         yield sse({"type": "start"})  # at once, so the page knows it's working
-        model = factory(state.settings)
+        model = factory(settings)
         with state.sessionmaker() as session:  # its own: the request's is gone once streaming starts
-            c = Ctx(session, state.settings, state.cache)
-            step_usd = worst_step_usd(state.settings)
+            c = Ctx(session, settings, state.cache)
+            step_usd = worst_step_usd(settings)
             turn = run_turn(
                 c, model, messages, on_finish=lambda summary: settle(state.sessionmaker, row_id, summary, step_usd)
             )

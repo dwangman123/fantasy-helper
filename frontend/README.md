@@ -27,11 +27,13 @@ Install, dev server and build are in [docs/development.md](../docs/development.m
 | `useTrade(teamId, partnerId, give, receive)` | `GET /api/trade` |
 | `useTrades(teamId)` | `GET /api/trades` |
 | `useRefresh()` | `POST /api/refresh` |
-| `askAgent(messages, onEvent, signal)` in [`lib/agent.ts`](lib/agent.ts) | `POST /api/agent`, read as a stream of events (not a query hook: a turn isn't cached) |
+| `askAgent(messages, teamId, onEvent, signal)` in [`lib/agent.ts`](lib/agent.ts) | `POST /api/agent`, read as a stream of events (not a query hook: a turn isn't cached) |
 
 ## Pages
 
-The six pages are client components. [`app/layout.tsx`](app/layout.tsx) wraps them all in the query provider and the [`TopBar`](components/TopBar.tsx). The top bar has the nav links, the "data from" time and the Refresh button. When the last ingest failed or had warnings, it also shows them in a banner. `/` redirects to `/matchup`.
+The six pages are client components. [`app/layout.tsx`](app/layout.tsx) wraps them all in the query provider and the [`TopBar`](components/TopBar.tsx). The top bar has the nav links, the default team, the "data from" time and the Refresh button. When the last ingest failed or had warnings, it also shows them in a banner. `/` redirects to `/matchup`.
+
+On a first visit, [`TeamChooser`](components/TeamChooser.tsx) asks which team is yours. The pick (or a skip) is kept in `localStorage` by [`lib/defaultTeam.ts`](lib/defaultTeam.ts), and the top bar button opens the dialog again to change it. It only decides which team a page opens on: Team, Waivers and Trades open on it, Matchup opens on its matchup (listed first), and the chat starts on it. Nothing marks it as "mine", and League, which shows every team, is unchanged.
 
 | Route | Shows | Hooks | Main components |
 |---|---|---|---|
@@ -40,7 +42,7 @@ The six pages are client components. [`app/layout.tsx`](app/layout.tsx) wraps th
 | [`/league`](app/league/page.tsx) | Power rankings and the 10-team category heatmap | `useLeague`, `usePower`, `useProfiles` | `ZShade` |
 | [`/waivers`](app/waivers/page.tsx) | Category board, then free agents ranked two ways: stream (this week's odds) and hold (rest of season) | `useLeague`, `useWaivers` | `TeamSelect`, `LabelChip`, `OddsBar`, `DeltaBar`, `Effects`, `PlayerCell` |
 | [`/trades`](app/trades/page.tsx) | Deals found that help both teams, and a builder to score any deal of up to 3 players a side | `useLeague`, `useTrades`, `useTeam` (both rosters), `useTrade` | `TeamSelect`, `DeltaBar`, `Effects`, `PlayerCell` |
-| [`/chat`](app/chat/page.tsx) | The chat assistant: ask about the league, see each tool it runs and the answer as it's written. The conversation stays in the tab (`sessionStorage`). "My team" in a question is the site owner's | `askAgent` ([`lib/agent.ts`](lib/agent.ts)) | `Markdown` |
+| [`/chat`](app/chat/page.tsx) | The chat assistant: ask about the league, see each tool it runs and the answer as it's written. The conversation stays in the tab (`sessionStorage`). "My team" in a question is the team picked at the top (the default team, else the site owner's), sent as `team_id`; picking another starts a new chat | `useLeague`, `askAgent` ([`lib/agent.ts`](lib/agent.ts)) | `TeamSelect`, `Markdown` |
 
 ### URL state
 
@@ -48,9 +50,9 @@ What's being viewed lives in the query string, so every view can be linked and r
 
 | Param | Pages | Hook | Default |
 |---|---|---|---|
-| `?team=7` | Team, Waivers, Trades | `useTeamParam` ([`TeamSelect.tsx`](components/TeamSelect.tsx)) | the first team by owner |
+| `?team=7` | Team, Waivers, Trades | `useTeamParam` ([`TeamSelect.tsx`](components/TeamSelect.tsx)) | the default team, else the first team by owner |
 | `?week=2` | Matchup | `useWeekParam` ([`MatchupPicker.tsx`](components/MatchupPicker.tsx)) | the current week |
-| `?matchup=12` | Matchup | `useMatchupParam` ([`MatchupPicker.tsx`](components/MatchupPicker.tsx)) | the week's first matchup; changing the week clears it |
+| `?matchup=12` | Matchup | `useMatchupParam` ([`MatchupPicker.tsx`](components/MatchupPicker.tsx)) | the default team's matchup (listed first), else the week's first; changing the week clears it |
 | `?partner=7&give=1,2&get=3` | Trades | `useDeal` ([`app/trades/page.tsx`](app/trades/page.tsx)) | no deal; changing the team clears it |
 
 The four pages that read these params (Matchup, Team, Waivers, Trades) render their view inside `<Suspense>`. Follow that pattern in a new page.
@@ -59,11 +61,12 @@ The four pages that read these params (Matchup, Team, Waivers, Trades) render th
 
 | Component | Renders |
 |---|---|
-| [`TopBar`](components/TopBar.tsx) | Nav, data time, Refresh button and the ingest-warnings banner |
+| [`TopBar`](components/TopBar.tsx) | Nav, default team, data time, Refresh button and the ingest-warnings banner |
+| [`TeamChooser`](components/TeamChooser.tsx) | The first-visit "which team is yours?" dialog, and the top bar button that reopens it |
 | [`RefreshButton`](components/RefreshButton.tsx) | Runs `useRefresh` and shows its error |
 | [`TeamSelect`](components/TeamSelect.tsx) | Team picker, plus `useTeamParam` |
-| [`MatchupPicker`](components/MatchupPicker.tsx) | `WeekStepper` (back and forward through the weeks) and `MatchupStrip` (a card per matchup with each side's win odds, or categories won once the week is over), `useWeekParam` / `useMatchupParam`, and `sides()`, which puts my team on the left (otherwise home) |
-| [`CategoryH2H`](components/CategoryH2H.tsx) | Each category head to head: current and projected totals on either side of its win / tie / loss bar, with the locked / swing status centered under it |
+| [`MatchupPicker`](components/MatchupPicker.tsx) | `WeekStepper` (back and forward through the weeks) and `MatchupStrip` (a card per matchup with each side's win odds, or categories won once the week is over), `useWeekParam` / `useMatchupParam`, and `sides()`, which puts the home team on the left |
+| [`CategoryH2H`](components/CategoryH2H.tsx) | Each category head to head: current and projected totals on either side of its win / tie / loss bar, with the locked / swing status centered under it. Real totals (so far, or final) are shaded in the color of the side leading them; projections only go bold. Also `currentScore()`, the score if the week ended now |
 | [`DayLineup`](components/DayLineup.tsx) | One day of the matchup: both teams' players in their ESPN slots, each game as one fantasy value (z-scores summed on the single-game scale) shaded against a typical game, with the player's usual and the two categories that moved it |
 | [`OddsHistory`](components/OddsHistory.tsx) | Both teams' win odds after each ingest, across the week (SVG) |
 | [`OddsBar`](components/OddsBar.tsx) | Win / tie / loss as one 100% bar, plus `OddsLegend` |

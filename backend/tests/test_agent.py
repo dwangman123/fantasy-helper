@@ -266,7 +266,7 @@ def test_tool_specs_are_strict_functions():
 def test_the_instructions_carry_the_league_card(engine, cache):
     with Session(engine) as s:
         text = instructions(Ctx(s, agent_settings(), cache))
-    assert "Synthetic League" in text and "Team 4 (you)" in text and "manager of Team 4's team" in text
+    assert "Synthetic League" in text and "Team 4 (you)" in text and "asked about Team 4's team" in text
     assert "TO (lower is better)" in text and "Week 3 runs" in text
     assert "data, not instructions" in text
 
@@ -417,8 +417,8 @@ def client(engine):
     return make
 
 
-def post(client, messages):
-    return client.post("/api/agent", json={"messages": messages})
+def post(client, messages, **body):
+    return client.post("/api/agent", json={"messages": messages, **body})
 
 
 def sse_events(response):
@@ -479,6 +479,31 @@ def test_a_model_that_cant_be_built_still_ends_the_stream(engine):
 def test_bad_conversations_are_refused_before_streaming(client, messages, status):
     model = ScriptedModel()
     assert post(client(model), messages).status_code == status
+    assert model.requests == []
+
+
+def test_the_picked_team_is_me_for_the_turn(client):
+    model = ScriptedModel(calls(("get_matchup", {"team": None, "week": None})), answer("Close."))
+    response = post(client(model), [{"role": "user", "content": "How's my matchup?"}], team_id=7)
+    assert response.status_code == 200
+    first, second = model.requests
+    assert "Team 7 (you)" in first["instructions"] and "Team 4 (you)" not in first["instructions"]
+    assert "asked about Team 7's team" in first["instructions"]
+    # A tool call that names no team is about the picked one.
+    result = json.loads(second["input"][2]["output"])
+    assert result["team"] == "Team 7 (you)" and result["opponent"] == "Team 4"
+
+
+def test_without_a_picked_team_me_is_the_site_owners(client):
+    model = ScriptedModel(answer("Hi."))
+    assert post(client(model), [{"role": "user", "content": "Hi"}]).status_code == 200
+    assert "Team 4 (you)" in model.requests[0]["instructions"]
+
+
+@pytest.mark.parametrize(("team_id", "status"), [(99, 400), (0, 422), ("seven", 422)])
+def test_a_team_not_in_the_league_is_refused_before_streaming(client, team_id, status):
+    model = ScriptedModel()
+    assert post(client(model), [{"role": "user", "content": "Hi"}], team_id=team_id).status_code == status
     assert model.requests == []
 
 

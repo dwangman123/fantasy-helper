@@ -42,17 +42,19 @@ export function recent(messages: ChatMessage[]): ChatMessage[] {
 }
 
 // Sends the conversation, the last message a question, and calls `onEvent` for each event as it
-// arrives. Throws ApiError when the backend refuses before streaming (429 over the spending cap,
-// 503 not set up, 400 / 422 a bad conversation), and an AbortError if `signal` stops it.
+// arrives. `teamId` is the team the questions are about ("my team"); without it, the site owner's.
+// Throws ApiError when the backend refuses before streaming (429 over the spending cap, 503 not set
+// up, 400 / 422 a bad conversation or team), and an AbortError if `signal` stops it.
 export async function askAgent(
   messages: ChatMessage[],
+  teamId: number | undefined,
   onEvent: (event: AgentEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
   const res = await fetch("/api/agent", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ messages: recent(messages) }),
+    body: JSON.stringify({ messages: recent(messages), team_id: teamId }),
     signal,
   });
   if (!res.ok || !res.body) {
