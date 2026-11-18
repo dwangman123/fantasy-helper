@@ -31,7 +31,7 @@ Install, dev server and build are in [docs/development.md](../docs/development.m
 
 ## Pages
 
-The six pages are client components. [`app/layout.tsx`](app/layout.tsx) wraps them all in the query provider and the [`TopBar`](components/TopBar.tsx). The top bar has the nav links and the My team button on one row, and the league name, "data from" time and Refresh button on the row below. When the last ingest failed or had warnings, it also shows them in a banner. `/` redirects to `/matchup`.
+The six pages are client components. [`app/layout.tsx`](app/layout.tsx) wraps them all in the query provider and the [`TopBar`](components/TopBar.tsx). The top bar is one row: the nav links, then the My team button, when the data was last updated and the Refresh button. (The league's name is the League page's heading.) When the last ingest failed or had warnings, it also shows them in a banner. `/` redirects to `/matchup`.
 
 On a first visit, [`TeamChooser`](components/TeamChooser.tsx) asks which team is yours. The pick (or a skip) is kept in `localStorage` by [`lib/defaultTeam.ts`](lib/defaultTeam.ts), and the top bar's My team button opens the dialog again to change it. It only decides which team a page opens on: Team, Waivers and Trades open on it, Matchup opens on its matchup (listed first), and the chat starts on it. Nothing marks it as "mine", and League, which shows every team, is unchanged.
 

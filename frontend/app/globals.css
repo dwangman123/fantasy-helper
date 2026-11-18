@@ -150,14 +150,8 @@ h2 {
   box-shadow: 0 0 0 1px var(--border);
 }
 
-/* The team button ends the nav row; the league, data time and Refresh get their own row below. */
-.topbar-team {
-  margin-left: auto;
-}
-
 .topbar-meta {
-  flex-basis: 100%;
-  justify-content: flex-end;
+  margin-left: auto;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -384,7 +378,10 @@ button.refresh:disabled {
 
 /* Tables */
 
+/* Positioned so screen-reader-only text inside a wide table stays in this scroll box instead of
+   widening the page. */
 .table-wrap {
+  position: relative;
   overflow-x: auto;
 }
 
