@@ -97,7 +97,7 @@ def test_the_spending_cap_on_postgres(pg):
     now = datetime.now(UTC)
     reserve(Sessions, capped, "old", now - timedelta(hours=25))  # outside the window
     first = reserve(Sessions, capped, "a", now)
-    settle(Sessions, first, {"status": "ok", "known": True, "cost_usd": 0.002, "tools": ["get_matchup"]})
+    settle(Sessions, first, {"status": "ok", "cost_usd": 0.002, "tools": ["get_matchup"]}, 0.015)
     reserve(Sessions, capped, "b", now)
     reserve(Sessions, capped, "c", now)
     with Sessions() as s:

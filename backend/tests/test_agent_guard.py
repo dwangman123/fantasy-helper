@@ -276,3 +276,13 @@ def test_a_model_that_cant_be_made_costs_nothing(league):
     assert ask(client).status_code == 200
     (row,) = rows(league)
     assert row.status == "error" and row.cost_usd == 0.0
+
+
+def test_a_stream_closed_before_the_turn_starts_costs_nothing(league):
+    row_id = reserve(league, cap_settings(), "v", datetime.now(UTC))
+    state = app(league, ScriptedModel(answer("never"))).app.state
+    stream = _events(state, state.agent_model_factory, [Message("user", "hi")], row_id)
+    assert '"start"' in next(stream)
+    stream.close()  # the visitor left before anything else happened
+    (row,) = rows(league)
+    assert row.status == "closed" and row.cost_usd == 0.0

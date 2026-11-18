@@ -154,16 +154,14 @@ def _close(content: Iterator[str]) -> None:
 def _events(
     state: Any, factory: Callable[[Settings], ChatModel], messages: list[Message], row_id: int
 ) -> Iterator[str]:
-    yield sse({"type": "start"})  # at once, so the page knows it's working
+    # Once the turn has produced an event it settles itself (run_turn's on_finish). Before that
+    # nothing has been spent: the model is only called inside the turn, and the stream can only be
+    # closed at one of these yields. So a stream that ends sooner settles at no cost.
+    turn_started = False
+    status = "closed"
     try:
+        yield sse({"type": "start"})  # at once, so the page knows it's working
         model = factory(state.settings)
-    except Exception:
-        log.exception("agent model couldn't be made")
-        settle(state.sessionmaker, row_id, {"status": "error", "cost_usd": 0.0}, 0.0)  # nothing was spent
-        yield sse({"type": "error", "message": "Something went wrong on our side."})
-        yield sse({"type": "done"})
-        return
-    try:
         with state.sessionmaker() as session:  # its own: the request's is gone once streaming starts
             c = Ctx(session, state.settings, state.cache)
             step_usd = worst_step_usd(state.settings)
@@ -172,10 +170,15 @@ def _events(
             )
             try:
                 for event in turn:
+                    turn_started = True
                     yield sse(public(event))
             finally:
                 turn.close()  # settles the turn now, if the visitor left, while the session is open
     except Exception:
         log.exception("agent stream failed")
+        status = "error"
         yield sse({"type": "error", "message": "Something went wrong on our side."})
         yield sse({"type": "done"})
+    finally:
+        if not turn_started:
+            settle(state.sessionmaker, row_id, {"status": status, "cost_usd": 0.0}, 0.0)

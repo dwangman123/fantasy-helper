@@ -27,8 +27,19 @@ export type AgentEvent =
   | ({ type: "usage" } & Usage)
   | { type: "done" };
 
-// Mirrors MAX_QUESTION_CHARS in backend agent/routes.py.
+// Mirror backend agent/routes.py: MAX_QUESTION_CHARS, MAX_ANSWER_CHARS and RECENT_MESSAGES. The
+// server refuses a longer question or answer, and only reads the latest messages anyway.
 export const MAX_QUESTION_CHARS = 2000;
+export const MAX_ANSWER_CHARS = 8000;
+export const RECENT_MESSAGES = 20;
+
+// What to send of a conversation: its latest messages, starting with a question, earlier answers
+// cut to the length the server takes. Sending it all would get a long chat refused.
+export function recent(messages: ChatMessage[]): ChatMessage[] {
+  const kept = messages.slice(-RECENT_MESSAGES);
+  while (kept.length > 1 && kept[0].role !== "user") kept.shift();
+  return kept.map((m) => (m.role === "assistant" ? { ...m, content: m.content.slice(0, MAX_ANSWER_CHARS) } : m));
+}
 
 // Sends the conversation, the last message a question, and calls `onEvent` for each event as it
 // arrives. Throws ApiError when the backend refuses before streaming (429 over the spending cap,
@@ -41,7 +52,7 @@ export async function askAgent(
   const res = await fetch("/api/agent", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({ messages: recent(messages) }),
     signal,
   });
   if (!res.ok || !res.body) {
