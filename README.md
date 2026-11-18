@@ -75,6 +75,8 @@ Ask something like *"Who should I pick up to win steals this week?"* and an assi
 
 The conversation stays in the browser tab and isn't stored. The server keeps only each answer's tokens, cost and tools, for a spending cap: $1 a day across everyone, and 30 questions a day per visitor. A question costs well under a cent.
 
+![The Chat page: a pickup question and a follow-up about the matchup, each with the tools it ran and an answer quoting their numbers](docs/screenshots/chat.png)
+
 ## How players are valued: G-scores
 
 The usual fantasy value is a **z-score sum**: how far a player's per-game average is above the pool's, in standard deviations, added up over the nine categories. It treats every category alike. But a head-to-head week is a small sample, and in some categories a player's weekly numbers bounce a lot compared with how much players differ from each other. Steals bounce the most for their spread; rebounds and assists much less. So an edge in steals is more often luck in a given week. **G-scores** (Rosenof, [arXiv:2307.02188](https://arxiv.org/abs/2307.02188v5)) account for that. They add each category's week-to-week variance to the z-score's denominator. The paper shows that z-scores are the special case in which future performances are known exactly.
